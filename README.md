@@ -6,6 +6,13 @@
 
 ---
 
+## 安装
+
+- **Windows**：到 [Releases](https://github.com/raoliaoyuan/LociFind/releases) 下载 NSIS 安装包（未签名，SmartScreen 提示选「仍要运行」）。
+- **macOS**：暂需从源码构建（DMG 自动构建筹备中）。
+
+SmartScreen / Gatekeeper 放行步骤、SHA256 校验、源码构建、可选模型下载，详见 **[安装指南](./docs/install.md)**。
+
 ## 这个仓库是什么
 
 LociFind 是一个由 **Claude Code / Codex / Gemini** 三个 AI 工具轮换协作开发的项目。本仓库的文档结构按这一协作模式设计。

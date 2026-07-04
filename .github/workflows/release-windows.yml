@@ -77,7 +77,8 @@ jobs:
             LociFind Windows 测试版（NSIS 安装包）。
 
             - 由 GitHub Actions 在 windows-latest 上自动构建。
-            - 未做代码签名，首次运行 Windows SmartScreen 可能提示，选择「仍要运行」即可。
+            - 未做代码签名（开源免费分发），首次运行 Windows SmartScreen 可能提示，选择「更多信息 → 仍要运行」即可。
+            - 放行步骤 / SHA256 校验 / 升级卸载说明：见 [安装指南](https://github.com/raoliaoyuan/LociFind/blob/main/docs/install.md)。
 
             **模型文件（均可选，首选应用内「快速入门」一键下载；也可手动放置到 `%APPDATA%\LociFind\models\`）：**
             - `embeddinggemma-300m-q8_0.gguf` —— 语义召回 embedding 模型（启用「按意思找到」/ 跨语言）。缺失则语义召回降级纯关键词（FTS）。
