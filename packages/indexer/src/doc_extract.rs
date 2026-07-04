@@ -1,0 +1,803 @@
+//! 文档正文提取（BETA-02）：docx / pptx / xlsx / pdf / html / md / txt / eml（BETA-37）。
+//!
+//! 每格式抽取「标题 / 作者 / 正文 / 页(节)数」，正文交给 [`crate::doc_db`] 入 FTS。
+//! 提取失败（损坏 / 不支持）返回 [`IndexError::Tag`]，由增量循环计 failed 跳过、不中断。
+
+use std::fs;
+use std::io::Read;
+use std::path::Path;
+
+use quick_xml::events::Event;
+use quick_xml::Reader;
+
+use crate::model::{DocumentEntry, ExtractedDoc, PageFailure, PagePassage};
+use crate::IndexError;
+
+/// 正文字符上限（防超大文档撑爆 FTS 行）。
+const MAX_BODY_CHARS: usize = 1024 * 1024;
+
+/// 各格式提取器的通用返回：`(title, author, body, page_count, passages, failed_pages)`。
+///
+/// 除 PDF 扫描版路径（BETA-35 cycle 4）外，各格式一律返回空 `passages` / `failed_pages`
+/// vec——从而落库时只走 `documents` + `documents_fts`，与 tuple 时代逐字节等价
+/// （BETA-27 byte-equal 保护）。
+pub(crate) type Extracted = (
+    Option<String>,
+    Option<String>,
+    String,
+    Option<u32>,
+    Vec<PagePassage>,
+    Vec<PageFailure>,
+);
+
+pub(crate) fn tag_err(path: &Path, detail: impl Into<String>) -> IndexError {
+    IndexError::Tag {
+        path: path.to_string_lossy().into_owned(),
+        detail: detail.into(),
+    }
+}
+
+/// 从单个文档提取 metadata + 正文（+ 扫描 PDF 时的段落 / 失败页）。
+///
+/// 返回 [`ExtractedDoc`]（BETA-35 cycle 4 从 tuple 升级）：`body` 进 FTS，
+/// `passages` / `failed_pages` 空时行为与 cycle 3 之前完全相同。
+pub fn extract_document(path: &Path, modified_time: i64) -> Result<ExtractedDoc, IndexError> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+
+    let (title, author, body, page_count, passages, failed_pages): Extracted = match ext.as_str() {
+        "docx" => extract_docx(path)?,
+        "pptx" => extract_pptx(path)?,
+        "xlsx" | "xls" | "ods" => extract_spreadsheet(path)?,
+        "pdf" => extract_pdf(path)?,
+        "html" | "htm" => extract_html(path)?,
+        "md" | "markdown" => extract_md(path)?,
+        // csv/tsv 按纯文本提取（BETA-40 评测暴露的企业归档覆盖缺口：权限清单 / 台账导出）。
+        "txt" | "csv" | "tsv" => extract_txt(path)?,
+        // BETA-37：eml 邮件（headers + 正文 + 附件递交现有提取管线，附件展开深度 1）。
+        "eml" => crate::email_extract::extract_eml(path, true)?,
+        other => return Err(tag_err(path, format!("不支持的扩展名: {other}"))),
+    };
+
+    let body = truncate_chars(&body, MAX_BODY_CHARS);
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+
+    // BETA-38 doc identity：文件原始字节指纹（读取失败降级 None，不阻断索引）。
+    let content_hash = crate::embed::file_identity_hash(path).ok();
+    let entry = DocumentEntry {
+        path: path.to_string_lossy().into_owned(),
+        file_name,
+        title,
+        author,
+        doc_type: normalize_doc_type(&ext),
+        page_count,
+        modified_time,
+        content_hash,
+    };
+    Ok(ExtractedDoc {
+        entry,
+        body,
+        passages,
+        failed_pages,
+    })
+}
+
+fn normalize_doc_type(ext: &str) -> String {
+    match ext {
+        "htm" => "html".to_string(),
+        "markdown" => "md".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        s.chars().take(max).collect()
+    }
+}
+
+// ============================================================
+// 通用 XML 文本收集
+// ============================================================
+
+/// 收集 XML 中所有 Text 事件（以空格连接）；`skip_tags`（local name）内的内容跳过。
+fn collect_xml_text(xml: &str, skip_tags: &[&[u8]]) -> String {
+    let mut reader = Reader::from_str(xml);
+    let mut body = String::new();
+    let mut buf_depth = 0usize; // 当前是否在 skip 元素内
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                let local = e.local_name();
+                if buf_depth > 0 || skip_tags.contains(&local.as_ref()) {
+                    buf_depth += 1;
+                }
+            }
+            Ok(Event::End(_)) => {
+                buf_depth = buf_depth.saturating_sub(1);
+            }
+            Ok(Event::Text(e)) if buf_depth == 0 => {
+                if let Ok(t) = e.decode() {
+                    let t = t.trim();
+                    if !t.is_empty() {
+                        body.push_str(t);
+                        body.push(' ');
+                    }
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    body
+}
+
+/// 取 XML 中某 local-name 元素的首个文本（用于 core.xml 的 dc:title / dc:creator）。
+fn first_element_text(xml: &str, want_local: &[u8]) -> Option<String> {
+    let mut reader = Reader::from_str(xml);
+    let mut capture = false;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) if e.local_name().as_ref() == want_local => capture = true,
+            Ok(Event::Text(e)) if capture => {
+                if let Ok(t) = e.decode() {
+                    let t = t.trim();
+                    if !t.is_empty() {
+                        return Some(t.to_string());
+                    }
+                }
+                capture = false;
+            }
+            Ok(Event::End(e)) if e.local_name().as_ref() == want_local => capture = false,
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    None
+}
+
+// ============================================================
+// OOXML（docx / pptx）
+// ============================================================
+
+fn read_zip_entry<R: Read + std::io::Seek>(
+    zip: &mut zip::ZipArchive<R>,
+    name: &str,
+) -> Option<String> {
+    let mut file = zip.by_name(name).ok()?;
+    let mut s = String::new();
+    file.read_to_string(&mut s).ok()?;
+    Some(s)
+}
+
+/// docProps/core.xml 的 dc:title / dc:creator。
+fn read_core_props<R: Read + std::io::Seek>(
+    zip: &mut zip::ZipArchive<R>,
+) -> (Option<String>, Option<String>) {
+    let Some(xml) = read_zip_entry(zip, "docProps/core.xml") else {
+        return (None, None);
+    };
+    let title = first_element_text(&xml, b"title");
+    let author = first_element_text(&xml, b"creator");
+    (title, author)
+}
+
+fn extract_docx(path: &Path) -> Result<Extracted, IndexError> {
+    let file = fs::File::open(path).map_err(|e| tag_err(path, e.to_string()))?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| tag_err(path, e.to_string()))?;
+    let xml = read_zip_entry(&mut zip, "word/document.xml")
+        .ok_or_else(|| tag_err(path, "缺少 word/document.xml"))?;
+    let body = collect_xml_text(&xml, &[]);
+    let (title, author) = read_core_props(&mut zip);
+    Ok((title, author, body, None, Vec::new(), Vec::new()))
+}
+
+fn extract_pptx(path: &Path) -> Result<Extracted, IndexError> {
+    let file = fs::File::open(path).map_err(|e| tag_err(path, e.to_string()))?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| tag_err(path, e.to_string()))?;
+
+    // 收集 ppt/slides/slideN.xml（排除 slideLayout / slideMaster / notesSlide）。
+    let slide_names: Vec<String> = (0..zip.len())
+        .filter_map(|i| zip.by_index(i).ok().map(|f| f.name().to_string()))
+        .filter(|n| {
+            n.starts_with("ppt/slides/slide")
+                && std::path::Path::new(n)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("xml"))
+                && !n.contains("slideLayout")
+                && !n.contains("slideMaster")
+        })
+        .collect();
+
+    let mut body = String::new();
+    for name in &slide_names {
+        if let Some(xml) = read_zip_entry(&mut zip, name) {
+            body.push_str(&collect_xml_text(&xml, &[]));
+        }
+    }
+    let page_count = u32::try_from(slide_names.len()).ok();
+    let (title, author) = read_core_props(&mut zip);
+    Ok((title, author, body, page_count, Vec::new(), Vec::new()))
+}
+
+// ============================================================
+// 电子表格（calamine：xlsx / xls / ods）
+// ============================================================
+
+fn extract_spreadsheet(path: &Path) -> Result<Extracted, IndexError> {
+    use calamine::Reader;
+    let mut wb = calamine::open_workbook_auto(path).map_err(|e| tag_err(path, e.to_string()))?;
+    let sheet_names = wb.sheet_names().clone();
+    let mut body = String::new();
+    for name in &sheet_names {
+        if let Ok(range) = wb.worksheet_range(name) {
+            for row in range.rows() {
+                for cell in row {
+                    let s = cell.to_string();
+                    if !s.is_empty() {
+                        body.push_str(&s);
+                        body.push(' ');
+                    }
+                }
+            }
+        }
+    }
+    let page_count = u32::try_from(sheet_names.len()).ok();
+    Ok((None, None, body, page_count, Vec::new(), Vec::new()))
+}
+
+// ============================================================
+// PDF
+// ============================================================
+
+/// 扫描版 PDF 判定阈值（cycle 2 简版：整文档字符数 < 阈值 → 扫描版）。
+///
+/// **策略选择说明**：spec §4.2 原写"每页平均 <10 字符"公式需要 `page_count`；
+/// 当前 pdf-extract 未返回 PDF 页数，若拿则需引入 pdfinfo shell-out 或 lopdf
+/// 依赖——留 cycle 3 pipeline 整合 `PdfRasterizer` 时同步升级。cycle 2 用整
+/// 文档阈值覆盖「完全无文本层 / 极稀薄」这一极端情形（≈"每页平均 <10 chars"
+/// 在典型 10 页文档上等价），其他 PDF 一律走原路径不动、保 BETA-27 byte-equal。
+const SCANNED_TEXT_FLOOR_CHARS: usize = 100;
+
+/// 判定 pdf-extract 抽出的文本是否属于扫描版 PDF（文本层稀薄/为空）。
+///
+/// 纯函数，便于单测；由 [`extract_pdf`] 与 cycle 3 pipeline 整合后共用。
+fn is_scanned_pdf(text_len_chars: usize) -> bool {
+    text_len_chars < SCANNED_TEXT_FLOOR_CHARS
+}
+
+fn extract_pdf(path: &Path) -> Result<Extracted, IndexError> {
+    // pdf-extract 对部分文本层编码不支持时会 **panic**（如中文 CID 字体 CMap
+    // `UniGB-UCS2-H`——企业中文卷宗大量使用）或返 Err。这类 PDF 文本层存在但读不出，
+    // 按「无可用文本层」降级 rasterize + OCR 管线兜底，而不是整份计 failed 静默丢
+    // （BETA-40 企业三场景排查实锤：合成中文文本层 PDF 全数因此 panic 未落库）。
+    // panic 静默：scan.rs 增量循环的 catch_extract 已装 quiet hook；直接调用方
+    // （单测 / 诊断）会看到一条 panic 打印，可接受。
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        pdf_extract::extract_text(path)
+    })) {
+        Ok(Ok(body)) => classify_pdf_extraction(path, body),
+        Ok(Err(e)) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "pdf-extract 文本层提取失败，降级 rasterize + OCR 管线"
+            );
+            extract_scanned_pdf_via_ocr(path)
+        }
+        Err(_) => {
+            tracing::warn!(
+                path = %path.display(),
+                "pdf-extract panic（不支持的编码 / 畸形文件），降级 rasterize + OCR 管线"
+            );
+            extract_scanned_pdf_via_ocr(path)
+        }
+    }
+}
+
+/// 分支路径：拿到 pdf-extract 文本后，按 [`is_scanned_pdf`] 判定走原路径还是走
+/// 扫描版分支。抽出纯逻辑 helper 便于单测（extract_pdf 依赖真 PDF fixture）。
+///
+/// - **文本层充分** → 走原路径，`passages` / `failed_pages` 皆空，落库时只写
+///   documents + FTS（BETA-27 byte-equal 不动）
+/// - **扫描版** → [`extract_scanned_pdf_via_ocr`] 真跑 rasterize + OCR pipeline，
+///   passages / failed_pages 携带页级结果
+fn classify_pdf_extraction(path: &Path, body: String) -> Result<Extracted, IndexError> {
+    if is_scanned_pdf(body.chars().count()) {
+        tracing::warn!(
+            path = %path.display(),
+            text_len = body.chars().count(),
+            "扫描版 PDF 检出，走 rasterize + OCR 管线"
+        );
+        return extract_scanned_pdf_via_ocr(path);
+    }
+    Ok((None, None, body, None, Vec::new(), Vec::new()))
+}
+
+/// 扫描版 PDF 真跑管线：`default_pdf_rasterizer()` → `render_pages` → 逐页
+/// `default_ocr_engine().recognize()` → [`aggregate_page_ocr_results`]。
+///
+/// **依赖不可用时的降级**：
+/// - pdftoppm 未装（`default_pdf_rasterizer` 返 None）→ [`IndexError::Tag`] 计 failed，
+///   onboarding 会引导用户装 poppler（BETA-35 cycle 6）；
+/// - OCR 引擎均不可用（Windows.Media.Ocr + Tesseract 都无）→ 同上，onboarding 已引导。
+///
+/// **成本注意**：`default_*` 工厂 per-call 都会跑一次 detect（spawn 探测进程）。
+/// cycle 3 阶段 per-doc 一次 detect 可接受；cycle 4-5 pipeline 大改时会把
+/// detect 提到 scan.rs 增量循环外做一次并缓存。
+fn extract_scanned_pdf_via_ocr(path: &Path) -> Result<Extracted, IndexError> {
+    let rasterizer = crate::pdf_rasterizer::default_pdf_rasterizer().ok_or_else(|| {
+        tag_err(
+            path,
+            "扫描版 PDF 需 pdftoppm（poppler-utils）渲染页，未装 → 跳过（onboarding 会引导装）",
+        )
+    })?;
+    let ocr = crate::ocr::default_ocr_engine().ok_or_else(|| {
+        tag_err(
+            path,
+            "扫描版 PDF 需 OCR 引擎（Windows.Media.Ocr / Tesseract），均不可用 → 跳过",
+        )
+    })?;
+    let rendered = rasterizer.render_pages(path)?;
+    let page_ocr_results: Vec<(u32, Result<String, IndexError>)> = rendered
+        .pages()
+        .iter()
+        .map(|(page_no, png)| (*page_no, ocr.recognize(png)))
+        .collect();
+    // rendered 在此 drop → 临时 PNG 自动清理（RasterizedPdf RAII 语义）。
+    aggregate_page_ocr_results(path, page_ocr_results)
+}
+
+/// 聚合逐页 OCR 结果为 [`Extracted`]（BETA-35 cycle 4 升级：保留 page_no 结构）：
+/// - **body**：拼接所有非空白成功页文本，每页之间 `\n` 分隔（进 FTS）；
+/// - **passages**：每个成功且非空白页对应一段 [`PagePassage`]（`seq=0`；后续可
+///   在页内切分），带 `page_no` 落 `document_passages` 表——**命中回页**（验收 ②）
+///   数据源；
+/// - **failed_pages**：失败页 → [`PageFailure`]（含 `reason`），落
+///   `document_failed_pages` 表——**失败页不静默丢**（验收 ③）；
+/// - **全失败**（`success_count == 0`）→ [`IndexError::Tag`] 让整份 PDF 计 failed。
+///
+/// **cycle 4 简化**：全空白 OCR 结果算 success 但**不生成 passage**（page 有 body 但无检索价值）；
+/// 若整份 PDF 全部页都空白，虽然 success_count > 0 但 passages 会为空、body 也为空——
+/// 这种情况通常是 OCR 引擎完全没识别出字，我们**仍算 success**（不进 failed 表），让
+/// 上层的 [`crate::embed::is_embed_worthy`] 挡向量污染。
+fn aggregate_page_ocr_results(
+    path: &Path,
+    results: Vec<(u32, Result<String, IndexError>)>,
+) -> Result<Extracted, IndexError> {
+    let total_pages = results.len();
+    let mut body = String::new();
+    let mut passages: Vec<PagePassage> = Vec::new();
+    let mut failed_pages: Vec<PageFailure> = Vec::new();
+    let mut success_count: usize = 0;
+    for (page_no, res) in results {
+        match res {
+            Ok(text) => {
+                success_count += 1;
+                if !text.trim().is_empty() {
+                    if !body.is_empty() {
+                        body.push('\n');
+                    }
+                    body.push_str(&text);
+                    passages.push(PagePassage {
+                        page_no,
+                        seq: 0,
+                        text,
+                    });
+                }
+            }
+            Err(e) => {
+                let reason = e.to_string();
+                tracing::warn!(
+                    path = %path.display(),
+                    page_no,
+                    error = %reason,
+                    "扫描版 PDF 单页 OCR 失败（落库 document_failed_pages）"
+                );
+                failed_pages.push(PageFailure { page_no, reason });
+            }
+        }
+    }
+    if success_count == 0 {
+        return Err(tag_err(
+            path,
+            format!("扫描版 PDF 全部 {total_pages} 页 OCR 失败"),
+        ));
+    }
+    let page_count = u32::try_from(total_pages).ok();
+    Ok((None, None, body, page_count, passages, failed_pages))
+}
+
+// ============================================================
+// HTML / Markdown / TXT
+// ============================================================
+
+fn extract_html(path: &Path) -> Result<Extracted, IndexError> {
+    let raw = fs::read(path).map_err(|e| tag_err(path, e.to_string()))?;
+    let xml = String::from_utf8_lossy(&raw);
+    let title = first_element_text(&xml, b"title");
+    let body = collect_xml_text(&xml, &[b"script".as_slice(), b"style".as_slice()]);
+    Ok((title, None, body, None, Vec::new(), Vec::new()))
+}
+
+fn extract_md(path: &Path) -> Result<Extracted, IndexError> {
+    use pulldown_cmark::{Event as MdEvent, Parser};
+    let text = fs::read_to_string(path).map_err(|e| tag_err(path, e.to_string()))?;
+    let mut body = String::new();
+    for ev in Parser::new(&text) {
+        if let MdEvent::Text(t) | MdEvent::Code(t) = ev {
+            body.push_str(&t);
+            body.push(' ');
+        }
+    }
+    Ok((None, None, body, None, Vec::new(), Vec::new()))
+}
+
+fn extract_txt(path: &Path) -> Result<Extracted, IndexError> {
+    let raw = fs::read(path).map_err(|e| tag_err(path, e.to_string()))?;
+    let body = String::from_utf8_lossy(&raw).into_owned();
+    Ok((None, None, body, None, Vec::new(), Vec::new()))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn collect_text_from_docx_xml() {
+        let xml = r"<w:document><w:body><w:p><w:r><w:t>季度</w:t></w:r><w:r><w:t>预算</w:t></w:r></w:p></w:body></w:document>";
+        let body = collect_xml_text(xml, &[]);
+        assert!(body.contains("季度"));
+        assert!(body.contains("预算"));
+    }
+
+    #[test]
+    fn collect_text_from_pptx_xml() {
+        let xml = r"<p:sld><p:cSld><p:spTree><a:p><a:r><a:t>Slide One</a:t></a:r></a:p></p:spTree></p:cSld></p:sld>";
+        let body = collect_xml_text(xml, &[]);
+        assert!(body.contains("Slide One"));
+    }
+
+    #[test]
+    fn collect_text_skips_script_style() {
+        let html = r"<html><head><style>.x{color:red}</style></head><body><script>alert('bad')</script><p>Hello World</p></body></html>";
+        let body = collect_xml_text(html, &[b"script".as_slice(), b"style".as_slice()]);
+        assert!(body.contains("Hello World"));
+        assert!(!body.contains("alert"), "script 内容应被跳过: {body}");
+        assert!(!body.contains("color"), "style 内容应被跳过: {body}");
+    }
+
+    #[test]
+    fn first_element_text_reads_core_props() {
+        let xml = r#"<cp:coreProperties xmlns:dc="x"><dc:title>季度报告</dc:title><dc:creator>张三</dc:creator></cp:coreProperties>"#;
+        assert_eq!(
+            first_element_text(xml, b"title").as_deref(),
+            Some("季度报告")
+        );
+        assert_eq!(first_element_text(xml, b"creator").as_deref(), Some("张三"));
+        assert_eq!(first_element_text(xml, b"subject"), None);
+    }
+
+    #[test]
+    fn extract_txt_reads_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("note.txt");
+        fs::write(&path, "hello 季度预算 world").unwrap();
+        let ExtractedDoc { entry, body, .. } = extract_document(&path, 42).unwrap();
+        assert_eq!(entry.doc_type, "txt");
+        assert_eq!(entry.modified_time, 42);
+        assert!(body.contains("季度预算"));
+    }
+
+    #[test]
+    fn extract_csv_tsv_as_plain_text() {
+        // BETA-40 评测暴露：企业归档权限清单 / 台账导出常为 csv/tsv，按纯文本提取。
+        let dir = tempfile::tempdir().unwrap();
+        let csv = dir.path().join("accounts.csv");
+        fs::write(&csv, "账号,用途\nsvc_kunpeng,数据库只读账号\n").unwrap();
+        let ExtractedDoc { entry, body, .. } = extract_document(&csv, 0).unwrap();
+        assert_eq!(entry.doc_type, "csv");
+        assert!(body.contains("数据库只读账号"));
+
+        let tsv = dir.path().join("ledger.tsv");
+        fs::write(&tsv, "科目\t金额\n维护费\t1200\n").unwrap();
+        let ExtractedDoc { entry, body, .. } = extract_document(&tsv, 0).unwrap();
+        assert_eq!(entry.doc_type, "tsv");
+        assert!(body.contains("维护费"));
+    }
+
+    #[test]
+    fn extract_md_strips_syntax() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("readme.md");
+        fs::write(&path, "# 标题\n\nHello **world** and `code`.").unwrap();
+        let ExtractedDoc { entry, body, .. } = extract_document(&path, 0).unwrap();
+        assert_eq!(entry.doc_type, "md");
+        assert!(body.contains("标题"));
+        assert!(body.contains("Hello"));
+        assert!(body.contains("world"));
+        assert!(body.contains("code"));
+        assert!(!body.contains('#'), "markdown 语法应被剥离: {body}");
+        assert!(!body.contains('*'));
+    }
+
+    #[test]
+    fn extract_html_title_and_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("page.html");
+        fs::write(
+            &path,
+            r"<html><head><title>报告页</title></head><body><script>x()</script><p>正文内容</p></body></html>",
+        )
+        .unwrap();
+        let ExtractedDoc { entry, body, .. } = extract_document(&path, 0).unwrap();
+        assert_eq!(entry.doc_type, "html");
+        assert_eq!(entry.title.as_deref(), Some("报告页"));
+        assert!(body.contains("正文内容"));
+        assert!(!body.contains("x()"));
+    }
+
+    #[test]
+    fn extract_docx_end_to_end_via_minimal_zip() {
+        use zip::write::SimpleFileOptions;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("doc.docx");
+        // 构造最小 docx：仅 word/document.xml + docProps/core.xml。
+        let f = fs::File::create(&path).unwrap();
+        let mut zw = zip::ZipWriter::new(f);
+        let opts = SimpleFileOptions::default();
+        zw.start_file("word/document.xml", opts).unwrap();
+        zw.write_all(
+            r"<w:document><w:body><w:p><w:r><w:t>季度预算分析</w:t></w:r></w:p></w:body></w:document>".as_bytes(),
+        )
+        .unwrap();
+        zw.start_file("docProps/core.xml", opts).unwrap();
+        zw.write_all(
+            r"<cp:coreProperties><dc:title>Q1 报告</dc:title><dc:creator>李四</dc:creator></cp:coreProperties>".as_bytes(),
+        )
+        .unwrap();
+        zw.finish().unwrap();
+
+        let ExtractedDoc { entry, body, .. } = extract_document(&path, 7).unwrap();
+        assert_eq!(entry.doc_type, "docx");
+        assert_eq!(entry.title.as_deref(), Some("Q1 报告"));
+        assert_eq!(entry.author.as_deref(), Some("李四"));
+        assert!(body.contains("季度预算分析"));
+    }
+
+    #[test]
+    fn extract_pptx_counts_slides() {
+        use zip::write::SimpleFileOptions;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deck.pptx");
+        let f = fs::File::create(&path).unwrap();
+        let mut zw = zip::ZipWriter::new(f);
+        let opts = SimpleFileOptions::default();
+        for (i, word) in ["第一页", "第二页"].iter().enumerate() {
+            zw.start_file(format!("ppt/slides/slide{}.xml", i + 1), opts)
+                .unwrap();
+            zw.write_all(
+                format!(r"<p:sld><a:p><a:r><a:t>{word}</a:t></a:r></a:p></p:sld>").as_bytes(),
+            )
+            .unwrap();
+        }
+        // 干扰项：layout 不应计入。
+        zw.start_file("ppt/slideLayouts/slideLayout1.xml", opts)
+            .unwrap();
+        zw.write_all(r"<x><a:t>布局噪声</a:t></x>".as_bytes())
+            .unwrap();
+        zw.finish().unwrap();
+
+        let ExtractedDoc { entry, body, .. } = extract_document(&path, 0).unwrap();
+        assert_eq!(entry.doc_type, "pptx");
+        assert_eq!(entry.page_count, Some(2), "应只数 2 张幻灯片");
+        assert!(body.contains("第一页"));
+        assert!(body.contains("第二页"));
+        assert!(!body.contains("布局噪声"));
+    }
+
+    #[test]
+    fn unsupported_extension_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.zip");
+        fs::write(&path, b"x").unwrap();
+        assert!(matches!(
+            extract_document(&path, 0),
+            Err(IndexError::Tag { .. })
+        ));
+    }
+
+    #[test]
+    fn corrupt_docx_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.docx");
+        fs::write(&path, b"not a zip").unwrap();
+        assert!(matches!(
+            extract_document(&path, 0),
+            Err(IndexError::Tag { .. })
+        ));
+    }
+
+    #[test]
+    fn truncate_chars_caps_length() {
+        let s = "a".repeat(10);
+        assert_eq!(truncate_chars(&s, 4).chars().count(), 4);
+        assert_eq!(truncate_chars(&s, 100).chars().count(), 10);
+    }
+
+    // ===== BETA-35 cycle 2：扫描版 PDF 判定 + extract_pdf 分支 =====
+
+    #[test]
+    fn is_scanned_pdf_empty_treated_as_scanned() {
+        // 完全无文本层（0 字符）→ 扫描版。
+        assert!(is_scanned_pdf(0));
+    }
+
+    #[test]
+    fn is_scanned_pdf_below_floor_treated_as_scanned() {
+        // 阈值以下 → 扫描版（文本层过于稀薄，几乎肯定需要 OCR）。
+        assert!(is_scanned_pdf(1));
+        assert!(is_scanned_pdf(50));
+        assert!(is_scanned_pdf(99));
+        assert!(is_scanned_pdf(SCANNED_TEXT_FLOOR_CHARS - 1));
+    }
+
+    #[test]
+    fn is_scanned_pdf_at_or_above_floor_treated_as_text_layer() {
+        // 阈值上方（含边界）→ 文本层充分，走原路径。
+        assert!(!is_scanned_pdf(SCANNED_TEXT_FLOOR_CHARS));
+        assert!(!is_scanned_pdf(101));
+        assert!(!is_scanned_pdf(1_000));
+        assert!(!is_scanned_pdf(10_000));
+    }
+
+    #[test]
+    fn classify_pdf_text_layer_returns_body_unchanged() {
+        // 分支①：非扫描版 → 原路径，byte-equal 关键点（passages/failed_pages 皆空）。
+        let body = "a".repeat(200);
+        let (title, author, out_body, page_count, passages, failed_pages) =
+            classify_pdf_extraction(Path::new("/tmp/fake-text-layer.pdf"), body.clone()).unwrap();
+        assert_eq!(title, None);
+        assert_eq!(author, None);
+        assert_eq!(out_body, body);
+        assert_eq!(page_count, None);
+        assert!(
+            passages.is_empty(),
+            "文本层 PDF 走原路径不应产生 passages（byte-equal 保护）"
+        );
+        assert!(
+            failed_pages.is_empty(),
+            "文本层 PDF 走原路径不应产生 failed_pages"
+        );
+    }
+
+    // 注：cycle 2 阶段的 `classify_pdf_scanned_returns_tag_err_with_hint` /
+    // `classify_pdf_empty_body_treated_as_scanned` 单测已被 cycle 3 pipeline 整合替换——
+    // 扫描版分支现在走真 rasterize + OCR pipeline，结果依赖本机 pdftoppm/OCR 装机状态，
+    // 不再是稳定的纯逻辑；扫描版检测本身由 `is_scanned_pdf_*` 单测覆盖，pipeline 聚合
+    // 由下方 `aggregate_page_ocr_results_*` 单测覆盖。
+
+    // ===== BETA-35 cycle 3：aggregate_page_ocr_results 纯逻辑 =====
+
+    fn fake_ocr_err(page: u32) -> IndexError {
+        IndexError::Tag {
+            path: "/tmp/fake.pdf".to_string(),
+            detail: format!("模拟第 {page} 页 OCR 失败"),
+        }
+    }
+
+    #[test]
+    fn aggregate_all_success_concatenates_pages_with_newline_and_page_no_kept() {
+        let results = vec![
+            (1, Ok("第一页 hello".to_string())),
+            (2, Ok("第二页 world".to_string())),
+            (3, Ok("第三页 done".to_string())),
+        ];
+        let (title, author, body, page_count, passages, failed_pages) =
+            aggregate_page_ocr_results(Path::new("/tmp/x.pdf"), results).unwrap();
+        assert_eq!(title, None);
+        assert_eq!(author, None);
+        assert!(body.contains("第一页"));
+        assert!(body.contains("第二页"));
+        assert!(body.contains("第三页"));
+        // 三页应有 2 个换行分隔。
+        assert_eq!(body.matches('\n').count(), 2);
+        assert_eq!(page_count, Some(3));
+        // BETA-35 cycle 4：page_no 结构保留在 passages 里，命中回页数据源。
+        assert_eq!(passages.len(), 3);
+        assert_eq!(passages[0].page_no, 1);
+        assert_eq!(passages[0].seq, 0);
+        assert_eq!(passages[0].text, "第一页 hello");
+        assert_eq!(passages[2].page_no, 3);
+        assert!(failed_pages.is_empty());
+    }
+
+    #[test]
+    fn aggregate_partial_success_failed_page_recorded_with_reason() {
+        // 3 页，1 失败：body/passages 只含成功页，failed_pages 记录失败页 + reason（验收 ③）。
+        let results = vec![
+            (1, Ok("有效文本".to_string())),
+            (2, Err(fake_ocr_err(2))),
+            (3, Ok("第三页".to_string())),
+        ];
+        let (_, _, body, page_count, passages, failed_pages) =
+            aggregate_page_ocr_results(Path::new("/tmp/x.pdf"), results).unwrap();
+        assert!(body.contains("有效文本"));
+        assert!(body.contains("第三页"));
+        assert!(!body.contains("模拟"), "失败页错误内容不应进 body");
+        assert_eq!(
+            page_count,
+            Some(3),
+            "page_count 应为总页数 3（含失败页），不是成功页数 2"
+        );
+        // passages 只含成功页。
+        assert_eq!(passages.len(), 2);
+        assert_eq!(passages[0].page_no, 1);
+        assert_eq!(passages[1].page_no, 3);
+        // failed_pages 记 (page_no, reason)——验收 ③。
+        assert_eq!(failed_pages.len(), 1);
+        assert_eq!(failed_pages[0].page_no, 2);
+        assert!(failed_pages[0].reason.contains("模拟第 2 页 OCR 失败"));
+    }
+
+    #[test]
+    fn aggregate_all_failure_returns_tag_err() {
+        let results = vec![(1, Err(fake_ocr_err(1))), (2, Err(fake_ocr_err(2)))];
+        let err = aggregate_page_ocr_results(Path::new("/tmp/x.pdf"), results).unwrap_err();
+        match err {
+            IndexError::Tag { detail, .. } => {
+                assert!(
+                    detail.contains("全部") && detail.contains("2 页"),
+                    "全失败提示应含总页数: {detail}"
+                );
+            }
+            other => panic!("应返回 IndexError::Tag，实际: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn aggregate_empty_pages_returns_tag_err() {
+        // 空 vec：视同全失败（0 页成功）。
+        let err = aggregate_page_ocr_results(Path::new("/tmp/x.pdf"), vec![]).unwrap_err();
+        assert!(matches!(err, IndexError::Tag { .. }));
+    }
+
+    #[test]
+    fn aggregate_skips_whitespace_only_pages_from_body_and_passages() {
+        // OCR 引擎返回全空白（页面识别正常但没字）→ 算 success 但不加入 body，也不生成 passage。
+        let results = vec![
+            (1, Ok("   \n  ".to_string())),
+            (2, Ok("有效内容".to_string())),
+        ];
+        let (_, _, body, page_count, passages, failed_pages) =
+            aggregate_page_ocr_results(Path::new("/tmp/x.pdf"), results).unwrap();
+        assert_eq!(body, "有效内容", "空白页不进 body、不留分隔换行");
+        assert_eq!(page_count, Some(2));
+        // 空白页不生成 passage（检索价值为零）。
+        assert_eq!(passages.len(), 1);
+        assert_eq!(passages[0].page_no, 2);
+        assert!(failed_pages.is_empty());
+    }
+
+    #[test]
+    fn aggregate_first_page_whitespace_no_leading_newline() {
+        // 首页空白 + 次页有内容 → body 应无前导换行。
+        let results = vec![(1, Ok("   ".to_string())), (2, Ok("正文".to_string()))];
+        let (_, _, body, _, passages, _) =
+            aggregate_page_ocr_results(Path::new("/tmp/x.pdf"), results).unwrap();
+        assert_eq!(body, "正文");
+        assert_eq!(passages.len(), 1);
+        assert_eq!(passages[0].page_no, 2);
+    }
+}

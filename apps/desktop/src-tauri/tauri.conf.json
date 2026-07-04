@@ -1,0 +1,52 @@
+{
+  "productName": "LociFind",
+  "version": "0.9.13",
+  "identifier": "ai.locifind.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LociFind",
+        "width": 800,
+        "height": 600,
+        "resizable": true,
+        "theme": "Light"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {},
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../../resources/synonyms/zh.yaml": "synonyms/zh.yaml",
+      "../../../resources/synonyms/en.yaml": "synonyms/en.yaml",
+      "../使用手册.md": "使用手册.md"
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./nsis/uninstall-hooks.nsh"
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "created_at": "2026-06-13T03:51:13.248661+00:00",
+  "dataset_name": "lora-aug-keywords",
+  "generation_method": "parser-diff",
+  "generator_version": "build_lora_dataset@c3cd9292a7d07169855f51cc511c9c3e91a6a287",
+  "license": "internal",
+  "privacy_review_status": "synthetic-no-pii",
+  "reviewer": "Claude Code",
+  "source": "packages/evals/fixtures/lora-aug-keywords/v1/cases.json",
+  "source_sha256": "1e1f1e33f52e35a9ff53867f0852260e2e46a2a8b7aaaae98bf9f33d37df4a54",
+  "stats": {
+    "by_fillable_field": {
+      "keywords": 122,
+      "location": 16,
+      "time": 8
+    },
+    "empty_patch": 0,
+    "nonempty_patch": 122,
+    "skipped_not_fillable": 0,
+    "skipped_variant_mismatch": 0,
+    "total_cases": 122
+  },
+  "version": "v0"
+}

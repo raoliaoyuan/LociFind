@@ -1,0 +1,764 @@
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
+
+/// struct 级 `#[serde(default)]`：旧版 settings.json 缺任意字段都能解析成功，
+/// 缺失字段取 `Default` impl 的值——避免新增字段导致整体解析失败、用户设置被静默重置。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppSettings {
+    pub global_shortcut: String,
+    pub search_scope: Vec<String>,
+    pub enable_model_fallback: bool,
+    pub enable_tracing: bool,
+    /// BETA-23：模型文件路径覆盖（None = 默认 app 数据目录 models/qwen3-0.6b-q4_k_m.gguf）。
+    pub model_path: Option<String>,
+    /// BETA-15B-1：embedding 模型文件路径覆盖（None = 默认 app 数据目录 models/）。
+    pub embedding_model_path: Option<String>,
+    /// BETA-15B-3 簇A-1：语义相似度下限覆盖（None = 默认 DEFAULT_SIMILARITY_FLOOR）。
+    pub semantic_similarity_floor: Option<f32>,
+    /// BETA-27：索引的具体文件夹列表（统一，三臂共用）。空 = 系统默认（Music+Documents+Pictures）。
+    pub index_roots: Vec<String>,
+    /// BETA-33 cycle 6 v4（v0.9.5）：`index_roots` 非空时，是否**追加**系统默认目录
+    /// （Music+Documents+Pictures）一起扫。默认 `false`（旧覆盖语义、零回归：加自定义 = 只扫自定义）。
+    /// 前端「选项 → 索引」用 checkbox 暴露；勾上后前端把配置改成 true 保存、后端追加系统三夹。
+    /// **只在 `index_roots` 非空时生效**（空时本就走系统默认，参数无意义）。
+    pub include_system_defaults: bool,
+    /// BETA-27：排除的目录名 glob（basename，树中任何同名子目录被剪枝）。空 = 默认噪声表。
+    pub exclude_globs: Vec<String>,
+    /// BETA-33 cycle 7-b：per-root 子路径排除（相对 root 的 path glob）。
+    /// 每项 `{root, patterns}`。空列表 = 该 root 无 per-root 排除（仍走全局 exclude_globs basename 排除）。
+    /// **数据模型选 `Vec<RootExclude>` 而非 `HashMap`（Codex §10 OBJECT 1）**：
+    /// JSON object key 用路径字符串会让 Windows 盘符/反斜杠/大小写/尾部分隔符更脆，
+    /// 且未来加 enabled/comment/created_at 难扩展。
+    pub root_excludes: Vec<RootExclude>,
+    /// BETA-15B-3 A-2：融合层语义臂权重覆盖（None = 默认 DEFAULT_SEMANTIC_WEIGHT）。
+    /// clamp[0.5, 50.0]：下限防 FTS 倒挂、上限防无意义大值。
+    pub semantic_weight: Option<f64>,
+    /// BETA-39（2026-07-03）：图片 OCR 文本参与语义索引 opt-in（默认关）。
+    /// 开启后图片走更严的 0.75 质量门槛（`IMAGE_MEANINGFUL_RATIO_FLOOR`）入嵌；
+    /// 关闭时 embed / purge / 段落级 explain 三处均与 BETA-33 cycle 4 一刀切现状一致。
+    pub enable_image_semantics: bool,
+}
+
+/// BETA-33 cycle 7-b：per-root 子路径排除项。
+/// `root` 保留 display 形式（不做归一化，跟 index_roots 里字符串对应）；
+/// 后端过滤前调用 `normalize_root_key` 归一化再比较（Codex §10 SUGGEST 2）。
+///
+/// `patterns` 是**相对 root 的 path glob**（非 basename）：
+/// - `临时/**` = root 下 `临时` 目录及所有子；
+/// - `**/backup/**` = 任意深度下名为 `backup` 的目录及内容；
+/// - `*.old/*` = root 下以 `.old` 结尾的目录里所有直接子项。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RootExclude {
+    pub root: String,
+    pub patterns: Vec<String>,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            global_shortcut: if cfg!(target_os = "macos") {
+                "Option+Space".to_string()
+            } else {
+                "Ctrl+Space".to_string()
+            },
+            search_scope: vec!["~".to_string()],
+            enable_model_fallback: true,
+            enable_tracing: false,
+            model_path: None,
+            embedding_model_path: None,
+            semantic_similarity_floor: None,
+            index_roots: Vec::new(),
+            include_system_defaults: false,
+            exclude_globs: Vec::new(),
+            root_excludes: Vec::new(),
+            semantic_weight: None,
+            enable_image_semantics: false,
+        }
+    }
+}
+
+/// BETA-33 cycle 7-b（Codex §10 SUGGEST 2）：把路径归一化成用于比较 / 查找 / 去重的 key。
+///
+/// 语义：
+/// - Windows：分隔符统一为 `\`、末尾去 `\` / `/`、字母全部小写（Windows 路径大小写不敏感）
+/// - Unix：分隔符统一为 `/`、末尾去 `/`、大小写保留（Unix 路径大小写敏感）
+///
+/// 不做 `std::fs::canonicalize`——canonicalize 依赖路径存在性、且不同调用点结果可能不一致；
+/// 归一化 key 用于 root_excludes 查找 / 前缀匹配 / UI 去重、不需要 canonical 精确性。
+///
+/// 例：Windows 上 `C:\Users\Alice\Documents\` == `C:/Users/Alice/Documents` == `c:\users\alice\documents`。
+#[must_use]
+pub fn normalize_root_key(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    // 分隔符统一
+    #[cfg(windows)]
+    let sep_norm: String = trimmed.replace('/', "\\");
+    #[cfg(not(windows))]
+    let sep_norm: String = trimmed.replace('\\', "/");
+    // trim 尾部分隔符（保留根盘符 `C:\` 的分隔符——去掉会变纯盘符改语义）
+    let no_tail = {
+        let bytes = sep_norm.as_bytes();
+        if bytes.len() > 3 && (bytes[bytes.len() - 1] == b'\\' || bytes[bytes.len() - 1] == b'/') {
+            sep_norm[..sep_norm.len() - 1].to_string()
+        } else {
+            sep_norm
+        }
+    };
+    // Windows 大小写归一
+    #[cfg(windows)]
+    {
+        no_tail.to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        no_tail
+    }
+}
+
+/// BETA-27 默认目录名排除表（BETA-26 build_corpus 验证）。
+pub(crate) const DEFAULT_EXCLUDE_GLOBS: &[&str] = &[
+    "node_modules",
+    ".git",
+    "target",
+    ".cargo",
+    ".rustup",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "dist",
+    "build",
+    ".next",
+    "Pods",
+    ".gradle",
+    ".Trash",
+    "vendor",
+    ".cache",
+    "DerivedData",
+    "Library",
+];
+
+/// 系统默认索引三夹（音乐 / 文档 / 图片），返存在的部分。
+/// 抽出便于跨模块共用（RootIndexOverview 标 is_default 时按路径匹配）。
+pub(crate) fn system_default_roots() -> Vec<PathBuf> {
+    [dirs::audio_dir(), dirs::document_dir(), dirs::picture_dir()]
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+/// 解析索引根 + 每项是否为系统默认。BETA-33 cycle 6 v4 主 API：
+/// - `raw` 为空 → 全部系统默认三夹（`is_default = true`）
+/// - `raw` 非空 + `include_defaults = false` → 只用 `raw`（旧覆盖语义，`is_default = false`）
+/// - `raw` 非空 + `include_defaults = true` → `raw` 与系统三夹合并、去重（保 raw 顺序在前），
+///   系统默认项 `is_default = true`。
+pub(crate) fn resolve_index_roots_tagged(
+    raw: &[String],
+    include_defaults: bool,
+) -> Vec<(PathBuf, bool)> {
+    if raw.is_empty() {
+        return system_default_roots()
+            .into_iter()
+            .map(|p| (p, true))
+            .collect();
+    }
+    let mut out: Vec<(PathBuf, bool)> = raw.iter().map(|s| (PathBuf::from(s), false)).collect();
+    if include_defaults {
+        let defaults = system_default_roots();
+        let seen: std::collections::HashSet<PathBuf> = out.iter().map(|(p, _)| p.clone()).collect();
+        for d in defaults {
+            if !seen.contains(&d) {
+                out.push((d, true));
+            }
+        }
+    }
+    out
+}
+
+/// 解析排除 glob：配置非空用配置，空回退默认噪声表。
+/// BETA-27：reindex（read_index_config）接入。
+pub(crate) fn resolve_exclude_globs(raw: &[String]) -> Vec<String> {
+    if raw.is_empty() {
+        DEFAULT_EXCLUDE_GLOBS
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect()
+    } else {
+        raw.to_vec()
+    }
+}
+
+/// 语义相似度下限默认值（全仓单一默认源）。
+pub(crate) const DEFAULT_SIMILARITY_FLOOR: f32 = 0.30;
+
+/// 把设置里的原始下限值规整：有限值 clamp 到 [0,1]；None / 非有限 → 默认。
+pub(crate) fn resolve_similarity_floor(raw: Option<f32>) -> f32 {
+    match raw {
+        Some(v) if v.is_finite() => v.clamp(0.0, 1.0),
+        _ => DEFAULT_SIMILARITY_FLOOR,
+    }
+}
+
+/// 从 settings.json live-read 语义相似度下限（每次查询调）。读/解析失败 → 默认。
+pub(crate) fn read_similarity_floor(settings_path: &Option<std::path::PathBuf>) -> f32 {
+    let raw = settings_path
+        .as_ref()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<AppSettings>(&s).ok())
+        .and_then(|v| v.semantic_similarity_floor);
+    resolve_similarity_floor(raw)
+}
+
+/// 把设置里的原始 weight 值规整：有限值 clamp 到 [0.5, 50.0]
+/// （下限防 FTS 倒挂、上限防无意义大值，详 spec §4）；None / 非有限 → 默认。
+pub(crate) fn resolve_semantic_weight(raw: Option<f64>) -> f64 {
+    match raw {
+        Some(v) if v.is_finite() => v.clamp(0.5, 50.0),
+        _ => locifind_result_normalizer::DEFAULT_SEMANTIC_WEIGHT,
+    }
+}
+
+/// 从 settings.json live-read 语义臂权重（每次查询调）。读/解析失败 → 默认。
+pub(crate) fn read_semantic_weight(settings_path: &Option<std::path::PathBuf>) -> f64 {
+    let raw = settings_path
+        .as_ref()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<AppSettings>(&s).ok())
+        .and_then(|v| v.semantic_weight);
+    resolve_semantic_weight(raw)
+}
+
+/// BETA-39：从 settings.json live-read「图片语义索引」opt-in（启动期 purge / 语义 pass /
+/// 段落级 explain 三处调）。读/解析失败 → false（安全侧 = 现状一刀切）。
+pub(crate) fn read_enable_image_semantics(settings_path: &Option<std::path::PathBuf>) -> bool {
+    settings_path
+        .as_ref()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<AppSettings>(&s).ok())
+        .is_some_and(|v| v.enable_image_semantics)
+}
+
+/// 设置文件路径（BETA-21 隐私面板复用，展示「配置在哪」）。
+/// 不创建目录，仅解析路径（best-effort，失败返回 `None`）。
+pub(crate) fn settings_file_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|p| p.join("settings.json"))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    /// 旧版 settings.json 缺少 model_path 字段时，仍能正常解析（向前兼容）。
+    #[test]
+    fn old_settings_without_model_path_parses_ok() {
+        let json = r#"{"global_shortcut":"Option+Space","search_scope":["~"],"enable_model_fallback":true,"enable_tracing":false}"#;
+        let s: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(s.model_path.is_none());
+    }
+
+    #[test]
+    fn resolve_similarity_floor_clamps_and_defaults() {
+        assert_eq!(resolve_similarity_floor(None), DEFAULT_SIMILARITY_FLOOR);
+        assert_eq!(resolve_similarity_floor(Some(0.5)), 0.5);
+        assert_eq!(resolve_similarity_floor(Some(-1.0)), 0.0);
+        assert_eq!(resolve_similarity_floor(Some(2.0)), 1.0);
+        assert_eq!(
+            resolve_similarity_floor(Some(f32::NAN)),
+            DEFAULT_SIMILARITY_FLOOR
+        );
+    }
+
+    #[test]
+    fn old_settings_without_similarity_floor_parses_ok() {
+        let json = r#"{"global_shortcut":"Ctrl+Space","search_scope":["~"],"enable_model_fallback":true,"enable_tracing":false}"#;
+        let s: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(s.semantic_similarity_floor.is_none());
+    }
+
+    // 旧 resolve_index_roots(raw) wrapper cycle 6 v4 已删（无外部 caller、tagged 版覆盖）；
+    // 老测 resolve_index_roots_uses_config_when_nonempty 与其一并去掉，新 tagged 覆盖见下。
+
+    /// cycle 6 v4：tagged 版三分支（空 → 全 default；非空+false → 只 raw 且 !is_default；
+    /// 非空+true → raw 在前 + 追加系统默认且不重复且 is_default 标签正确）。
+    #[test]
+    fn resolve_index_roots_tagged_covers_three_branches() {
+        // 空 raw：全部系统默认（tagged=true 或 false 都一样，raw 主导）。
+        let empty_false = resolve_index_roots_tagged(&[], false);
+        assert!(
+            empty_false.iter().all(|(_, is_def)| *is_def),
+            "空 raw 时全部项 is_default=true"
+        );
+        let empty_true = resolve_index_roots_tagged(&[], true);
+        assert_eq!(
+            empty_false, empty_true,
+            "空 raw 时 include_defaults 参数无影响（本就走系统默认）"
+        );
+
+        // 非空 raw + include=false：只 raw、is_default 全 false（旧覆盖语义）。
+        let raw = vec!["/tmp/custom1".to_string(), "/tmp/custom2".to_string()];
+        let no_default = resolve_index_roots_tagged(&raw, false);
+        assert_eq!(no_default.len(), 2);
+        assert!(no_default.iter().all(|(_, is_def)| !is_def));
+
+        // 非空 raw + include=true：raw 在前，之后追加系统默认；raw 项 is_default=false、
+        // 系统默认项 is_default=true。
+        let with_default = resolve_index_roots_tagged(&raw, true);
+        assert!(with_default.len() >= 2, "至少含 2 个 raw 项");
+        assert_eq!(with_default[0].0, PathBuf::from("/tmp/custom1"));
+        assert!(!with_default[0].1);
+        assert_eq!(with_default[1].0, PathBuf::from("/tmp/custom2"));
+        assert!(!with_default[1].1);
+        // 追加部分（若系统能给出默认目录）都应带 is_default=true。
+        for (_, is_def) in &with_default[2..] {
+            assert!(*is_def);
+        }
+    }
+
+    /// cycle 6 v4：raw 与系统默认重叠时不重复入 tagged（去重按路径）。
+    #[test]
+    fn resolve_index_roots_tagged_dedups_overlap() {
+        // 若能拿到系统 audio_dir，就把它塞到 raw 里模拟"用户手动加了 Music"的场景；
+        // 拿不到就跳过（headless CI 可能返 None）。
+        let Some(audio) = dirs::audio_dir() else {
+            return;
+        };
+        let raw = vec![audio.to_string_lossy().into_owned()];
+        let tagged = resolve_index_roots_tagged(&raw, true);
+        let audio_count = tagged.iter().filter(|(p, _)| *p == audio).count();
+        assert_eq!(audio_count, 1, "raw 与系统默认重叠时不重复");
+        // 该项 is_default=false（raw 显式列出、按 raw 语义标非默认）。
+        assert!(
+            !tagged
+                .iter()
+                .find(|(p, _)| *p == audio)
+                .expect("audio_dir 应在 tagged 结果里")
+                .1
+        );
+    }
+
+    /// cycle 6 v4：AppSettings::default().include_system_defaults 应为 false（旧语义、零回归）。
+    #[test]
+    fn default_settings_does_not_include_system_defaults() {
+        let s = AppSettings::default();
+        assert!(!s.include_system_defaults);
+    }
+
+    #[test]
+    fn resolve_exclude_globs_empty_uses_defaults() {
+        let d = resolve_exclude_globs(&[]);
+        assert!(
+            d.iter().any(|g| g == "node_modules"),
+            "空 → 默认表含 node_modules"
+        );
+        let custom = resolve_exclude_globs(&["foo".to_string()]);
+        assert_eq!(custom, vec!["foo".to_string()]);
+    }
+
+    #[test]
+    fn old_settings_without_index_fields_parses_ok() {
+        let json = r#"{"global_shortcut":"Ctrl+Space","search_scope":["~"],"enable_model_fallback":true,"enable_tracing":false}"#;
+        let s: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(s.index_roots.is_empty());
+        assert!(s.exclude_globs.is_empty());
+    }
+
+    /// cycle 7-b：向前兼容——旧 settings.json 无 root_excludes 字段仍能解析（serde default）。
+    #[test]
+    fn old_settings_without_root_excludes_parses_ok() {
+        let json = r#"{"global_shortcut":"Ctrl+Space","index_roots":["/tmp"]}"#;
+        let s: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(s.root_excludes.is_empty(), "缺字段 → serde default 空 Vec");
+    }
+
+    /// cycle 7-b：默认 AppSettings 的 root_excludes 应为空 Vec（旧行为零回归）。
+    #[test]
+    fn root_excludes_default_is_empty() {
+        let s = AppSettings::default();
+        assert!(s.root_excludes.is_empty());
+    }
+
+    /// cycle 7-b：RootExclude serde round-trip。
+    #[test]
+    fn root_exclude_serde_round_trip() {
+        let re = RootExclude {
+            root: "C:\\Users\\Alice\\Documents".to_string(),
+            patterns: vec!["临时/**".to_string(), "**/backup/**".to_string()],
+        };
+        let json = serde_json::to_string(&re).unwrap();
+        let back: RootExclude = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, re);
+    }
+
+    /// cycle 7-b · Codex SUGGEST 2：Windows 路径不同 display 归一化到同一 key。
+    #[cfg(windows)]
+    #[test]
+    fn normalize_root_key_windows_equivalence() {
+        let a = normalize_root_key("C:\\Users\\Alice\\Documents");
+        let b = normalize_root_key("C:/Users/Alice/Documents");
+        let c = normalize_root_key("c:\\users\\alice\\documents\\");
+        let d = normalize_root_key("C:\\Users\\Alice\\Documents\\");
+        assert_eq!(a, b, "Windows 反斜杠 vs 正斜杠等价");
+        assert_eq!(a, c, "Windows 大小写不敏感");
+        assert_eq!(a, d, "尾部分隔符等价");
+        // 但根盘符 `C:\` 不该被裁成 `C:`
+        assert_eq!(normalize_root_key("C:\\"), "c:\\");
+    }
+
+    /// cycle 7-b · Codex SUGGEST 2：Unix 路径大小写敏感、分隔符归一。
+    #[cfg(not(windows))]
+    #[test]
+    fn normalize_root_key_unix_preserves_case() {
+        assert_eq!(
+            normalize_root_key("/home/User/Documents"),
+            "/home/User/Documents",
+            "Unix 保留大小写"
+        );
+        assert_eq!(
+            normalize_root_key("/home/User/Documents/"),
+            "/home/User/Documents",
+            "Unix 尾部斜杠去掉"
+        );
+        assert_eq!(
+            normalize_root_key("\\home\\User\\Documents"),
+            "/home/User/Documents",
+            "Unix 反斜杠转正斜杠"
+        );
+    }
+
+    /// cycle 7-b：空 / 空白输入 → 空 key（防 UI 传空串时崩）。
+    #[test]
+    fn normalize_root_key_empty_returns_empty() {
+        assert_eq!(normalize_root_key(""), "");
+        assert_eq!(normalize_root_key("   "), "");
+    }
+
+    #[test]
+    fn read_similarity_floor_reads_or_defaults() {
+        assert_eq!(read_similarity_floor(&None), DEFAULT_SIMILARITY_FLOOR);
+        let dir = std::env::temp_dir().join(format!("locifind-floor-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("settings.json");
+        std::fs::write(&f, r#"{"semantic_similarity_floor":0.55}"#).unwrap();
+        assert_eq!(read_similarity_floor(&Some(f)), 0.55);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resolve_semantic_weight_clamps_and_defaults() {
+        assert!(
+            (resolve_semantic_weight(None) - locifind_result_normalizer::DEFAULT_SEMANTIC_WEIGHT)
+                .abs()
+                < f64::EPSILON
+        );
+        assert!((resolve_semantic_weight(Some(3.0)) - 3.0).abs() < f64::EPSILON);
+        // clamp 下界 0.5（< 0.5 拉到 0.5）
+        assert!((resolve_semantic_weight(Some(0.1)) - 0.5).abs() < f64::EPSILON);
+        // clamp 上界 50.0
+        assert!((resolve_semantic_weight(Some(100.0)) - 50.0).abs() < f64::EPSILON);
+        // NaN → 默认
+        assert!(
+            (resolve_semantic_weight(Some(f64::NAN))
+                - locifind_result_normalizer::DEFAULT_SEMANTIC_WEIGHT)
+                .abs()
+                < f64::EPSILON
+        );
+    }
+
+    /// BETA-39：默认关 + 旧 settings.json 缺字段解析为 false + live-read 三态。
+    #[test]
+    fn enable_image_semantics_defaults_off_and_reads_ok() {
+        assert!(!AppSettings::default().enable_image_semantics, "默认关");
+        let json = r#"{"global_shortcut":"Ctrl+Space"}"#;
+        let s: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(!s.enable_image_semantics, "旧配置缺字段 → false");
+        // live-read：无路径 → false；有配置 → 读真值。
+        assert!(!read_enable_image_semantics(&None));
+        let dir = std::env::temp_dir().join(format!("locifind-imgsem-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("settings.json");
+        std::fs::write(&f, r#"{"enable_image_semantics":true}"#).unwrap();
+        assert!(read_enable_image_semantics(&Some(f.clone())));
+        std::fs::write(&f, r#"{"enable_image_semantics":false}"#).unwrap();
+        assert!(!read_enable_image_semantics(&Some(f)));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn old_settings_without_semantic_weight_parses_ok() {
+        let json = r#"{"global_shortcut":"Ctrl+Space","search_scope":["~"],"enable_model_fallback":true,"enable_tracing":false}"#;
+        let s: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(s.semantic_weight.is_none());
+    }
+
+    #[test]
+    fn read_semantic_weight_reads_or_defaults() {
+        assert!(
+            (read_semantic_weight(&None) - locifind_result_normalizer::DEFAULT_SEMANTIC_WEIGHT)
+                .abs()
+                < f64::EPSILON
+        );
+        let dir = std::env::temp_dir().join(format!("locifind-weight-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("settings.json");
+        std::fs::write(&f, r#"{"semantic_weight":3.5}"#).unwrap();
+        assert!((read_semantic_weight(&Some(f)) - 3.5).abs() < f64::EPSILON);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+fn get_settings_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let mut path = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("Failed to get app config dir: {}", e))?;
+
+    if !path.exists() {
+        fs::create_dir_all(&path).map_err(|e| format!("Failed to create config dir: {}", e))?;
+    }
+
+    path.push("settings.json");
+    Ok(path)
+}
+
+#[tauri::command]
+pub fn get_settings(app: AppHandle) -> Result<AppSettings, String> {
+    let path = get_settings_path(&app)?;
+
+    if !path.exists() {
+        return Ok(AppSettings::default());
+    }
+
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("Failed to read settings: {}", e))?;
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse settings: {}", e))
+}
+
+/// BETA-31-v3 cycle 6（v0.8.7）：返回**当前生效**的索引目录列表（绝对路径字符串）。
+/// 设置页用它在 `index_roots` 为空时显示「系统默认（音乐 / 文档 / 图片）」的具体路径、
+/// 让用户清楚知道当前在索引哪些目录、便于决定是否要加自定义目录覆盖默认。
+///
+/// 与 `resolve_index_roots_tagged` 行为对齐：
+/// - 入参 `index_roots` 非空 + `include_system_defaults=false` → 直接返（旧覆盖语义）
+/// - 入参 `index_roots` 非空 + `include_system_defaults=true` → 与系统三夹合并去重
+/// - 入参 `index_roots` 为空 → 返 dirs::audio_dir / document_dir / picture_dir 并集
+///
+/// **cycle 6 v2（v0.8.8）**：入参 `index_roots` 可选；前端传当前 useState 值时直接用、
+/// 不传时退到读 settings.json（保留旧调用方兼容）。修旧实现「数据源永远从文件读、
+/// 与前端 state 不同步」的 3 个 UX bug：用户在 UI 移除目录未保存时显示错位、
+/// 「系统默认」标签错误打在用户配置目录上、tab 切换不重 fetch。
+///
+/// **best-effort**：settings 读取失败 → 退到默认行为（系统三夹）；某 dirs 函数返 None →
+/// 跳过该项（不阻塞其他项）。
+#[tauri::command]
+pub fn get_effective_index_roots(
+    app: AppHandle,
+    index_roots: Option<Vec<String>>,
+    include_system_defaults: Option<bool>,
+) -> Result<Vec<String>, String> {
+    let (raw, include_defaults) = read_effective_inputs(&app, index_roots, include_system_defaults);
+    Ok(resolve_index_roots_tagged(&raw, include_defaults)
+        .into_iter()
+        .map(|(p, _)| p.to_string_lossy().into_owned())
+        .collect())
+}
+
+/// 收拢 get_effective_index_roots / get_index_overview 的入参解析逻辑：
+/// 未传时退到读 settings.json；两者行为一致。
+fn read_effective_inputs(
+    app: &AppHandle,
+    index_roots: Option<Vec<String>>,
+    include_system_defaults: Option<bool>,
+) -> (Vec<String>, bool) {
+    let settings = || -> Option<AppSettings> {
+        let path = get_settings_path(app).ok()?;
+        if !path.exists() {
+            return None;
+        }
+        let content = fs::read_to_string(&path).ok()?;
+        serde_json::from_str::<AppSettings>(&content).ok()
+    };
+    match (index_roots, include_system_defaults) {
+        (Some(r), Some(inc)) => (r, inc),
+        (Some(r), None) => (
+            r,
+            settings()
+                .map(|s| s.include_system_defaults)
+                .unwrap_or(false),
+        ),
+        (None, Some(inc)) => (settings().map(|s| s.index_roots).unwrap_or_default(), inc),
+        (None, None) => match settings() {
+            Some(s) => (s.index_roots, s.include_system_defaults),
+            None => (Vec::new(), false),
+        },
+    }
+}
+
+/// BETA-33 cycle 5（2026-07-01）：每个索引 root 的分类统计（doc / image / music）+
+/// 是否系统默认 + 上次索引时间。桌面「选项 → 索引」pane 用它渲染目录概貌 + 目录管理。
+#[derive(Debug, Clone, Serialize)]
+pub struct RootIndexOverview {
+    pub path: String,
+    /// 是否是系统默认目录（`index_roots` 为空时的回退项）。
+    pub is_default: bool,
+    /// 非图片文档条数（docx / pdf / txt / md / xlsx / pptx / ...）。
+    pub doc_count: u64,
+    /// 图片 OCR 条数（png / jpg / bmp / ...）。
+    pub image_count: u64,
+    /// 音乐条数（mp3 / flac / m4a / ...）。
+    pub music_count: u64,
+    /// 该 root 下最近一次 indexed_time，取 documents 表和 music 表 MAX 中较晚者；
+    /// 转 rfc3339 字符串前端直接展示。无记录 → None。
+    pub last_indexed_time: Option<String>,
+}
+
+/// BETA-33 cycle 5：返回**每个生效 root 的分类统计**（doc/image/music + 上次索引时间）。
+///
+/// 与 `get_effective_index_roots` 平行：入参 `index_roots` 可选，None 时退到读 settings.json。
+/// cycle 6 v4：`resolve_index_roots_tagged` 返回每项自带 is_default 标签，追加模式下混合列表精准标。
+///
+/// **性能**：单 sqlite 文件、两表各 3 GLOB 前缀 OR、每 root 2 次 query_row。真机 3-5 root
+/// 典型 <50ms。索引读并发不阻塞 reindex 写（BETA-04 busy_timeout=5s）。
+///
+/// **best-effort**：某 root 打开 DocumentIndex / MusicIndex 失败 → 该项返 0 计数、不整链 fail。
+#[tauri::command]
+pub fn get_index_overview(
+    app: AppHandle,
+    index_roots: Option<Vec<String>>,
+    include_system_defaults: Option<bool>,
+) -> Result<Vec<RootIndexOverview>, String> {
+    let (raw, include_defaults) = read_effective_inputs(&app, index_roots, include_system_defaults);
+    // cycle 6 v4：tagged 结果里每项自带 is_default 标签（追加模式下混合列表也能精准标）。
+    let tagged = resolve_index_roots_tagged(&raw, include_defaults);
+    let db_path = crate::local_index_db_path();
+
+    // 打开一次 doc / music index 复用（同一 sqlite 文件、两个连接）。
+    // 打开失败（首次未索引、文件不存在）→ 返所有 root 的 0 计数、不 fail。
+    let doc_idx = locifind_indexer::DocumentIndex::open(&db_path).ok();
+    let music_idx = locifind_indexer::MusicIndex::open(&db_path).ok();
+
+    let mut out: Vec<RootIndexOverview> = Vec::with_capacity(tagged.len());
+    for (path, is_default) in tagged {
+        let path_str = path.to_string_lossy().into_owned();
+        let doc_stats = doc_idx
+            .as_ref()
+            .and_then(|idx| idx.stats_under_root(&path_str).ok())
+            .unwrap_or(locifind_indexer::DocRootStats {
+                total: 0,
+                images: 0,
+                last_indexed_time: None,
+            });
+        let music_stats = music_idx
+            .as_ref()
+            .and_then(|idx| idx.stats_under_root(&path_str).ok())
+            .unwrap_or(locifind_indexer::MusicRootStats {
+                total: 0,
+                last_indexed_time: None,
+            });
+        // doc_stats.total 含图片，拆开：文档 = total - images。
+        let doc_count = doc_stats.total.saturating_sub(doc_stats.images);
+        // 综合 last_indexed = max(doc_last, music_last)。
+        let last_indexed_time =
+            match (doc_stats.last_indexed_time, music_stats.last_indexed_time) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                (Some(a), None) | (None, Some(a)) => Some(a),
+                (None, None) => None,
+            }
+            .and_then(|secs| {
+                chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0).map(|d| d.to_rfc3339())
+            });
+        out.push(RootIndexOverview {
+            path: path_str,
+            is_default,
+            doc_count,
+            image_count: doc_stats.images,
+            music_count: music_stats.total,
+            last_indexed_time,
+        });
+    }
+    Ok(out)
+}
+
+/// BETA-33 cycle 7-c：`purge_root_from_db` 的返回统计。
+#[derive(Debug, Clone, Serialize)]
+pub struct PurgeSummary {
+    /// documents 表删除条数（含图片；document_vectors 随外键级联）。
+    pub doc_deleted: u64,
+    /// music 表删除条数。
+    pub music_deleted: u64,
+}
+
+/// BETA-33 cycle 7-c（Codex SUGGEST 7/8）：清除某 root 子树下的索引记录（documents +
+/// music，FTS 同步删、向量外键级联）。**只删 LociFind 数据库缓存、绝不删磁盘文件**——
+/// 前端「移除并清除索引记录」二次确认后调用。SQL 全部在 indexer 存储层
+/// （`purge_under_root`，与 `stats_under_root` 共用边界谓词），此处只做薄封装。
+#[tauri::command]
+pub fn purge_root_from_db(root: String) -> Result<PurgeSummary, String> {
+    let db_path = crate::local_index_db_path();
+    let doc_deleted = locifind_indexer::DocumentIndex::open(&db_path)
+        .and_then(|idx| idx.purge_under_root(&root))
+        .map_err(|e| format!("清除文档索引失败: {e}"))?;
+    let music_deleted = locifind_indexer::MusicIndex::open(&db_path)
+        .and_then(|idx| idx.purge_under_root(&root))
+        .map_err(|e| format!("清除音乐索引失败: {e}"))?;
+    Ok(PurgeSummary {
+        doc_deleted,
+        music_deleted,
+    })
+}
+
+/// 「未能索引的文件」一条（BETA-40 `index_failures` 留痕的桌面消费）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ExtractionFailureJson {
+    /// 失败文件完整路径。
+    pub path: String,
+    /// 失败原因（提取器报错细节）。
+    pub reason: String,
+    /// 最近一次失败时间（rfc3339；时间戳异常时 None）。
+    pub failed_time: Option<String>,
+}
+
+/// 桌面「选项 → 索引」查询文件级提取失败留痕（路径 + 原因 + 时间，按时间倒序）。
+/// 成功重扫 / 文件从磁盘删除后由 indexer 自动清除对应条目。
+/// 首次未索引（db 不存在）→ 空列表、不报错。
+#[tauri::command]
+pub fn get_extraction_failures() -> Result<Vec<ExtractionFailureJson>, String> {
+    let db_path = crate::local_index_db_path();
+    if !db_path.exists() {
+        return Ok(Vec::new());
+    }
+    let idx = locifind_indexer::DocumentIndex::open(&db_path)
+        .map_err(|e| format!("打开索引数据库失败: {e}"))?;
+    let rows = idx
+        .extraction_failures()
+        .map_err(|e| format!("读取失败留痕失败: {e}"))?;
+    Ok(rows
+        .into_iter()
+        .map(|f| ExtractionFailureJson {
+            path: f.path,
+            reason: f.reason,
+            failed_time: chrono::DateTime::<chrono::Utc>::from_timestamp(f.failed_time, 0)
+                .map(|d| d.to_rfc3339()),
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn update_settings(app: AppHandle, settings: AppSettings) -> Result<(), String> {
+    let path = get_settings_path(&app)?;
+    let content = serde_json::to_string_pretty(&settings)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+
+    fs::write(path, content).map_err(|e| format!("Failed to save settings: {}", e))?;
+    Ok(())
+}

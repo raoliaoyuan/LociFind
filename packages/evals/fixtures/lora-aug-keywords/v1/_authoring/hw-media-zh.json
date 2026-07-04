@@ -1,0 +1,152 @@
+[
+  {
+    "id": "aug-hw-media-zh-001",
+    "query": "想听点适合通勤路上的歌",
+    "missing_keywords": ["通勤路上"]
+  },
+  {
+    "id": "aug-hw-media-zh-002",
+    "query": "来几首关于失恋疗伤那种的歌曲",
+    "missing_keywords": ["失恋疗伤"]
+  },
+  {
+    "id": "aug-hw-media-zh-003",
+    "query": "播放一些海边日落感觉的音乐",
+    "missing_keywords": ["海边日落"]
+  },
+  {
+    "id": "aug-hw-media-zh-004",
+    "query": "找点毕业旅行相关的歌听听",
+    "missing_keywords": ["毕业旅行"]
+  },
+  {
+    "id": "aug-hw-media-zh-005",
+    "query": "给我来几首加班深夜那种氛围的歌",
+    "missing_keywords": ["加班深夜"]
+  },
+  {
+    "id": "aug-hw-media-zh-006",
+    "query": "想听雨天读书适合的背景音乐",
+    "missing_keywords": ["雨天读书"]
+  },
+  {
+    "id": "aug-hw-media-zh-007",
+    "query": "公路旅行主题的歌曲来几首",
+    "missing_keywords": ["公路旅行"]
+  },
+  {
+    "id": "aug-hw-media-zh-008",
+    "query": "播放一些童年回忆风格的歌",
+    "missing_keywords": ["童年回忆"]
+  },
+  {
+    "id": "aug-hw-media-zh-009",
+    "query": "咖啡馆下午茶那种感觉的音乐给我来点",
+    "missing_keywords": ["咖啡馆下午茶"]
+  },
+  {
+    "id": "aug-hw-media-zh-010",
+    "query": "找几首山间徒步适合听的歌曲",
+    "missing_keywords": ["山间徒步"]
+  },
+  {
+    "id": "aug-hw-media-zh-011",
+    "query": "婚礼现场背景音乐推荐几首",
+    "missing_keywords": ["婚礼现场"]
+  },
+  {
+    "id": "aug-hw-media-zh-012",
+    "query": "旧城改造那种有年代感的歌来几首",
+    "missing_keywords": ["旧城改造"]
+  },
+  {
+    "id": "aug-hw-media-zh-013",
+    "query": "想听深夜电台风格的歌曲",
+    "missing_keywords": ["深夜电台"]
+  },
+  {
+    "id": "aug-hw-media-zh-014",
+    "query": "给我播几首夏天的雨那种感觉的单曲",
+    "missing_keywords": ["夏天的雨"]
+  },
+  {
+    "id": "aug-hw-media-zh-015",
+    "query": "健身房跑步节奏的歌曲帮我找几首",
+    "missing_keywords": ["健身房跑步"]
+  },
+  {
+    "id": "aug-hw-media-zh-016",
+    "query": "找点适合冬日暖阳氛围的音乐听",
+    "missing_keywords": ["冬日暖阳"]
+  },
+  {
+    "id": "aug-hw-media-zh-017",
+    "query": "午后慵懒时间适合听什么歌，来几首",
+    "missing_keywords": ["午后慵懒"]
+  },
+  {
+    "id": "aug-hw-media-zh-018",
+    "query": "播放一些关于乡愁故乡感觉的歌",
+    "missing_keywords": ["乡愁故乡"]
+  },
+  {
+    "id": "aug-hw-media-zh-019",
+    "query": "想听几首考试复习那种专注感的音乐",
+    "missing_keywords": ["考试复习"]
+  },
+  {
+    "id": "aug-hw-media-zh-020",
+    "query": "来些城市霓虹夜晚那种感觉的歌",
+    "missing_keywords": ["城市霓虹夜晚"]
+  },
+  {
+    "id": "aug-hw-media-zh-021",
+    "query": "找几首适合凌晨失眠时听的歌曲",
+    "missing_keywords": ["凌晨失眠"]
+  },
+  {
+    "id": "aug-hw-media-zh-022",
+    "query": "春天踏青户外的那种活泼的歌来一些",
+    "missing_keywords": ["春天踏青"]
+  },
+  {
+    "id": "aug-hw-media-zh-023",
+    "query": "播点适合烹饪做饭时候听的轻松音乐",
+    "missing_keywords": ["烹饪做饭"]
+  },
+  {
+    "id": "aug-hw-media-zh-024",
+    "query": "给我几首异国旅途相关主题的歌",
+    "missing_keywords": ["异国旅途"]
+  },
+  {
+    "id": "aug-hw-media-zh-025",
+    "query": "想听点关于初恋青春那种感觉的歌曲",
+    "missing_keywords": ["初恋青春"]
+  },
+  {
+    "id": "aug-hw-media-zh-026",
+    "query": "找几首图书馆自习氛围的背景音乐",
+    "missing_keywords": ["图书馆自习"]
+  },
+  {
+    "id": "aug-hw-media-zh-027",
+    "query": "来几首海岛度假风情的歌曲",
+    "missing_keywords": ["海岛度假"]
+  },
+  {
+    "id": "aug-hw-media-zh-028",
+    "query": "播放一些秋风落叶那种意境的歌",
+    "missing_keywords": ["秋风落叶"]
+  },
+  {
+    "id": "aug-hw-media-zh-029",
+    "query": "找几首适合睡前放空心情的歌曲听听",
+    "missing_keywords": ["睡前放空"]
+  },
+  {
+    "id": "aug-hw-media-zh-030",
+    "query": "给我来点老街弄堂那种怀旧风味的音乐",
+    "missing_keywords": ["老街弄堂"]
+  }
+]

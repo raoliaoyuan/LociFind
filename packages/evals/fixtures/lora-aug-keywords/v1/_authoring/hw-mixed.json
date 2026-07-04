@@ -1,0 +1,152 @@
+[
+  {
+    "id": "aug-hw-mixed-001",
+    "query": "帮我找下 quarterly report 文件名包含 draft 的，上个月的",
+    "missing_keywords": ["quarterly report"]
+  },
+  {
+    "id": "aug-hw-mixed-002",
+    "query": "那个 onboarding checklist，名字里带 v2 的",
+    "missing_keywords": ["onboarding checklist"]
+  },
+  {
+    "id": "aug-hw-mixed-003",
+    "query": "find 培训材料 files with 季度 in the name",
+    "missing_keywords": ["培训材料"]
+  },
+  {
+    "id": "aug-hw-mixed-004",
+    "query": "找一下 marketing plan 文件名包含 Q3 的",
+    "missing_keywords": ["marketing plan"]
+  },
+  {
+    "id": "aug-hw-mixed-005",
+    "query": "去年的 design review 名字里有 final 的文档",
+    "missing_keywords": ["design review"]
+  },
+  {
+    "id": "aug-hw-mixed-006",
+    "query": "那份 annual budget，文件名里有 2025 的",
+    "missing_keywords": ["annual budget"]
+  },
+  {
+    "id": "aug-hw-mixed-007",
+    "query": "上周开会用的 release notes，名字包含 patch 的",
+    "missing_keywords": ["release notes"]
+  },
+  {
+    "id": "aug-hw-mixed-008",
+    "query": "search for 项目方案 with proposal in the filename",
+    "missing_keywords": ["项目方案"]
+  },
+  {
+    "id": "aug-hw-mixed-009",
+    "query": "有没有 user research report 文件名含 round2 的",
+    "missing_keywords": ["user research report"]
+  },
+  {
+    "id": "aug-hw-mixed-010",
+    "query": "那个 product roadmap，名字里带 internal 的 ppt",
+    "missing_keywords": ["product roadmap"]
+  },
+  {
+    "id": "aug-hw-mixed-011",
+    "query": "帮我搜 performance review 文件名有 mid-year 的",
+    "missing_keywords": ["performance review"]
+  },
+  {
+    "id": "aug-hw-mixed-012",
+    "query": "find 合规检查报告 with audit in the name",
+    "missing_keywords": ["合规检查报告"]
+  },
+  {
+    "id": "aug-hw-mixed-013",
+    "query": "上个季度的 competitive analysis，名字里有 draft 的",
+    "missing_keywords": ["competitive analysis"]
+  },
+  {
+    "id": "aug-hw-mixed-014",
+    "query": "有 technical spec 文件名包含 v3 的文档吗",
+    "missing_keywords": ["technical spec"]
+  },
+  {
+    "id": "aug-hw-mixed-015",
+    "query": "那份 meeting minutes，名字里带 kickoff 的",
+    "missing_keywords": ["meeting minutes"]
+  },
+  {
+    "id": "aug-hw-mixed-016",
+    "query": "搜一下 risk assessment 文件名含 revised 的",
+    "missing_keywords": ["risk assessment"]
+  },
+  {
+    "id": "aug-hw-mixed-017",
+    "query": "find 用户增长分析 files with monthly in the filename",
+    "missing_keywords": ["用户增长分析"]
+  },
+  {
+    "id": "aug-hw-mixed-018",
+    "query": "去年做的 content strategy，文件名里有 final 的",
+    "missing_keywords": ["content strategy"]
+  },
+  {
+    "id": "aug-hw-mixed-019",
+    "query": "那个 API documentation 名字包含 beta 的",
+    "missing_keywords": ["API documentation"]
+  },
+  {
+    "id": "aug-hw-mixed-020",
+    "query": "帮我找 供应商合同 filename containing renewal 的",
+    "missing_keywords": ["供应商合同"]
+  },
+  {
+    "id": "aug-hw-mixed-021",
+    "query": "有没有 sprint retrospective 文件名里有 q4 的",
+    "missing_keywords": ["sprint retrospective"]
+  },
+  {
+    "id": "aug-hw-mixed-022",
+    "query": "上次改版的 UI style guide，名字里有 updated 的",
+    "missing_keywords": ["UI style guide"]
+  },
+  {
+    "id": "aug-hw-mixed-023",
+    "query": "search 年度总结 with 2024 in the name",
+    "missing_keywords": ["年度总结"]
+  },
+  {
+    "id": "aug-hw-mixed-024",
+    "query": "那份 budget proposal，文件名包含 revised 的表格",
+    "missing_keywords": ["budget proposal"]
+  },
+  {
+    "id": "aug-hw-mixed-025",
+    "query": "找一下 deployment checklist 名字里有 prod 的",
+    "missing_keywords": ["deployment checklist"]
+  },
+  {
+    "id": "aug-hw-mixed-026",
+    "query": "有 运营周报 with week in the filename 的文件吗",
+    "missing_keywords": ["运营周报"]
+  },
+  {
+    "id": "aug-hw-mixed-027",
+    "query": "那个 market research 文件名带 preliminary 的 pdf",
+    "missing_keywords": ["market research"]
+  },
+  {
+    "id": "aug-hw-mixed-028",
+    "query": "上半年的 sales forecast，名字里包含 Q2 的",
+    "missing_keywords": ["sales forecast"]
+  },
+  {
+    "id": "aug-hw-mixed-029",
+    "query": "find 产品需求文档 with prd in the name",
+    "missing_keywords": ["产品需求文档"]
+  },
+  {
+    "id": "aug-hw-mixed-030",
+    "query": "那份 incident report，文件名有 postmortem 的，上个月的",
+    "missing_keywords": ["incident report"]
+  }
+]

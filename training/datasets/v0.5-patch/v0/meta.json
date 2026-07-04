@@ -1,0 +1,25 @@
+{
+  "created_at": "2026-05-27T06:50:59.612404+00:00",
+  "dataset_name": "v0.5-patch",
+  "generation_method": "parser-diff",
+  "generator_version": "build_lora_dataset@ca5b78138427bb77883ffd19486fdd666a2ff01b",
+  "license": "internal",
+  "privacy_review_status": "synthetic-no-pii",
+  "reviewer": "Claude Code",
+  "source": "packages/evals/fixtures/v0.5/cases.json",
+  "source_sha256": "4f8646441cbbd1e1fb93bc17c58c97f63162176efa2608f57136183e22785b91",
+  "stats": {
+    "by_fillable_field": {
+      "action": 2,
+      "location": 31,
+      "media": 1,
+      "size": 1,
+      "time": 12
+    },
+    "empty_patch": 443,
+    "nonempty_patch": 55,
+    "skipped_variant_mismatch": 2,
+    "total_cases": 500
+  },
+  "version": "v0"
+}

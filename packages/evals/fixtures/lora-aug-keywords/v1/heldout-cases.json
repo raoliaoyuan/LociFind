@@ -1,0 +1,516 @@
+[
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "v3",
+        "项目方案"
+      ],
+      "language": "mixed",
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-hw-colloquial-008",
+    "language": "mixed",
+    "query": "嗯那个项目方案啥的，文件名字里有v3的那个，帮我翻出来",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "media_search",
+      "keywords": [
+        "喝酒聚会"
+      ],
+      "language": "zh",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc"
+    },
+    "id": "aug-hw-colloquial-018",
+    "language": "zh",
+    "query": "放点歌，要那种喝酒聚会嗨起来那个感觉的",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "春季",
+        "团建活动方案"
+      ],
+      "language": "zh",
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-hw-colloquial-026",
+    "language": "zh",
+    "query": "那个啥来着，团建活动方案，名字里有春季的，帮我翻出来",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "reconciliation",
+        "invoice summary"
+      ],
+      "language": "en",
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-hw-en-013",
+    "language": "en",
+    "query": "help me find the invoice summary, file name containing reconciliation",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "audit",
+        "compliance checklist"
+      ],
+      "language": "en",
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-hw-en-027",
+    "language": "en",
+    "query": "grab the compliance checklist — filename containing audit — from the legal folder",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "media_search",
+      "keywords": [
+        "summer road trip"
+      ],
+      "language": "en",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc"
+    },
+    "id": "aug-hw-media-en-005",
+    "language": "en",
+    "query": "give me tracks with a summer road trip feel",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "media_search",
+      "keywords": [
+        "long road trips"
+      ],
+      "language": "en",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc"
+    },
+    "id": "aug-hw-media-en-012",
+    "language": "en",
+    "query": "give me songs about long road trips and open highways",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "media_search",
+      "keywords": [
+        "cooking dinner"
+      ],
+      "language": "en",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc"
+    },
+    "id": "aug-hw-media-en-019",
+    "language": "en",
+    "query": "play some background music for cooking dinner",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "media_search",
+      "keywords": [
+        "heartache and longing"
+      ],
+      "language": "en",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc"
+    },
+    "id": "aug-hw-media-en-026",
+    "language": "en",
+    "query": "i want to hear tracks that capture heartache and longing",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "artist": "旅行相关",
+      "intent": "media_search",
+      "keywords": [
+        "毕业旅行"
+      ],
+      "language": "zh",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc",
+      "title": "歌听听"
+    },
+    "id": "aug-hw-media-zh-004",
+    "language": "zh",
+    "query": "找点毕业旅行相关的歌听听",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "artist": "那种感觉",
+      "intent": "media_search",
+      "keywords": [
+        "咖啡馆下午茶"
+      ],
+      "language": "zh",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc",
+      "title": "音乐给我来点"
+    },
+    "id": "aug-hw-media-zh-009",
+    "language": "zh",
+    "query": "咖啡馆下午茶那种感觉的音乐给我来点",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "artist": "跑步节奏",
+      "intent": "media_search",
+      "keywords": [
+        "健身房跑步"
+      ],
+      "language": "zh",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc",
+      "title": "歌曲帮我找几首"
+    },
+    "id": "aug-hw-media-zh-015",
+    "language": "zh",
+    "query": "健身房跑步节奏的歌曲帮我找几首",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "artist": "那种感觉",
+      "intent": "media_search",
+      "keywords": [
+        "城市霓虹夜晚"
+      ],
+      "language": "zh",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc"
+    },
+    "id": "aug-hw-media-zh-020",
+    "language": "zh",
+    "query": "来些城市霓虹夜晚那种感觉的歌",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "artist": "那种感觉",
+      "intent": "media_search",
+      "keywords": [
+        "初恋青春"
+      ],
+      "language": "zh",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc"
+    },
+    "id": "aug-hw-media-zh-025",
+    "language": "zh",
+    "query": "想听点关于初恋青春那种感觉的歌曲",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "artist": "怀旧风味",
+      "intent": "media_search",
+      "keywords": [
+        "老街弄堂"
+      ],
+      "language": "zh",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc"
+    },
+    "id": "aug-hw-media-zh-030",
+    "language": "zh",
+    "query": "给我来点老街弄堂那种怀旧风味的音乐",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "file_type": "document",
+      "intent": "file_search",
+      "keywords": [
+        "Q3",
+        "项目复盘"
+      ],
+      "language": "mixed",
+      "modified_time": {
+        "type": "relative",
+        "value": "last_year"
+      },
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-hw-zh-002",
+    "language": "mixed",
+    "query": "那个项目复盘的文档名字里有Q3的，去年的",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "立项",
+        "项目方案",
+        "预算表"
+      ],
+      "language": "zh",
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-hw-zh-020",
+    "language": "zh",
+    "query": "想看下项目方案和预算表的文件，名字里有立项的那种",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "运维",
+        "会议纪要"
+      ],
+      "language": "zh",
+      "modified_time": {
+        "from": "2025-01-01",
+        "to": "2025-12-31",
+        "type": "absolute"
+      },
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-tpl-001",
+    "language": "zh",
+    "query": "2025年的会议纪要文件名包含运维",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "合规",
+        "培训材料"
+      ],
+      "language": "zh",
+      "modified_time": {
+        "type": "relative",
+        "value": "last_year"
+      },
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-tpl-006",
+    "language": "zh",
+    "query": "去年的培训材料文件名包含合规",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "客户",
+        "课程笔记"
+      ],
+      "language": "zh",
+      "modified_time": {
+        "type": "relative",
+        "value": "last_month"
+      },
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-tpl-011",
+    "language": "zh",
+    "query": "上个月的课程笔记文件名包含客户",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "季度",
+        "调研报告"
+      ],
+      "language": "zh",
+      "modified_time": {
+        "type": "relative",
+        "value": "last_7_days"
+      },
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-tpl-016",
+    "language": "zh",
+    "query": "最近一周的调研报告文件名包含季度",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "验收",
+        "会议纪要"
+      ],
+      "language": "zh",
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-tpl-021",
+    "language": "zh",
+    "query": "找会议纪要相关的文件名包含验收的",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "架构",
+        "培训材料"
+      ],
+      "language": "zh",
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-tpl-026",
+    "language": "zh",
+    "query": "找培训材料相关的文件名包含架构的",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "运维",
+        "课程笔记"
+      ],
+      "language": "zh",
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-tpl-031",
+    "language": "zh",
+    "query": "找课程笔记相关的文件名包含运维的",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "合规",
+        "调研报告"
+      ],
+      "language": "zh",
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-tpl-036",
+    "language": "zh",
+    "query": "找调研报告相关的文件名包含合规的",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "roadmap",
+        "annual budget"
+      ],
+      "language": "en",
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-tpl-041",
+    "language": "en",
+    "query": "annual budget with filename containing roadmap",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "file_search",
+      "keywords": [
+        "handover",
+        "meeting notes"
+      ],
+      "language": "en",
+      "schema_version": "1.0",
+      "sort": "modified_desc"
+    },
+    "id": "aug-tpl-046",
+    "language": "en",
+    "query": "meeting notes with filename containing handover",
+    "variant": "FileSearch"
+  },
+  {
+    "expected_intent": {
+      "artist": "旅行相关",
+      "intent": "media_search",
+      "keywords": [
+        "毕业旅行"
+      ],
+      "language": "zh",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc"
+    },
+    "id": "aug-tpl-051",
+    "language": "zh",
+    "query": "播放毕业旅行相关的歌",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "artist": "日落相关",
+      "intent": "media_search",
+      "keywords": [
+        "海边日落"
+      ],
+      "language": "zh",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc"
+    },
+    "id": "aug-tpl-056",
+    "language": "zh",
+    "query": "播放海边日落相关的歌",
+    "variant": "MediaSearch"
+  },
+  {
+    "expected_intent": {
+      "intent": "media_search",
+      "keywords": [
+        "quiet mornings"
+      ],
+      "language": "en",
+      "media_type": "audio",
+      "schema_version": "1.0",
+      "sort": "relevance_desc"
+    },
+    "id": "aug-tpl-061",
+    "language": "en",
+    "query": "play some songs about quiet mornings",
+    "variant": "MediaSearch"
+  }
+]

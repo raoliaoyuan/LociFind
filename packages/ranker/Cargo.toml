@@ -1,0 +1,19 @@
+[package]
+name = "locifind-ranker"
+description = "BETA-05 多源结果排序：相关性启发式打分（name-match + 多源一致 + match-type）+ 显式 sort 跨源生效"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+locifind-result-normalizer = { path = "../result-normalizer" }
+locifind-search-backend = { path = "../search-backends/common" }
+
+[dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }

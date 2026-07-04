@@ -1,0 +1,152 @@
+[
+  {
+    "id": "aug-hw-colloquial-001",
+    "query": "诶帮我翻翻那个出差报销单文件名里头带十月的呗",
+    "missing_keywords": ["出差报销单"]
+  },
+  {
+    "id": "aug-hw-colloquial-002",
+    "query": "随便放点适合赖床那种感觉的歌呗",
+    "missing_keywords": ["赖床"]
+  },
+  {
+    "id": "aug-hw-colloquial-003",
+    "query": "那个啥…年度总结的玩意儿，名字里有终版俩字的",
+    "missing_keywords": ["年度总结"]
+  },
+  {
+    "id": "aug-hw-colloquial-004",
+    "query": "帮我找找那个什么采购合同，文件名里头有三季度那几个字的",
+    "missing_keywords": ["采购合同"]
+  },
+  {
+    "id": "aug-hw-colloquial-005",
+    "query": "我要听歌，放那种适合下雨天窝在家的，随便放",
+    "missing_keywords": ["下雨天"]
+  },
+  {
+    "id": "aug-hw-colloquial-006",
+    "query": "哦对那个会议记要，名字带立项评审的那个，帮我搜一下",
+    "missing_keywords": ["会议记要"]
+  },
+  {
+    "id": "aug-hw-colloquial-007",
+    "query": "来点跑步用的歌，就那种节奏特别快特别带劲的",
+    "missing_keywords": ["跑步"]
+  },
+  {
+    "id": "aug-hw-colloquial-008",
+    "query": "嗯那个项目方案啥的，文件名字里有v3的那个，帮我翻出来",
+    "missing_keywords": ["项目方案"]
+  },
+  {
+    "id": "aug-hw-colloquial-009",
+    "query": "放点背景音乐，那种适合深夜码代码的氛围感的",
+    "missing_keywords": ["深夜码代码"]
+  },
+  {
+    "id": "aug-hw-colloquial-010",
+    "query": "那个劳动合同的东西，名字里带二零二三的，帮我搜搜",
+    "missing_keywords": ["劳动合同"]
+  },
+  {
+    "id": "aug-hw-colloquial-011",
+    "query": "整点歌吧，要那种听了会想哭的情绪很满的",
+    "missing_keywords": ["想哭"]
+  },
+  {
+    "id": "aug-hw-colloquial-012",
+    "query": "那个啥的，产品需求文档，文件名字里头含有初稿的，帮我找找",
+    "missing_keywords": ["产品需求文档"]
+  },
+  {
+    "id": "aug-hw-colloquial-013",
+    "query": "来首歌，要那种开车兜风听的，要燃的",
+    "missing_keywords": ["开车兜风"]
+  },
+  {
+    "id": "aug-hw-colloquial-014",
+    "query": "帮我翻一下那个绩效考核表，文件名里有上半年那几个字的",
+    "missing_keywords": ["绩效考核表"]
+  },
+  {
+    "id": "aug-hw-colloquial-015",
+    "query": "随便播首歌，那种适合一个人发呆的，安安静静的那种",
+    "missing_keywords": ["发呆"]
+  },
+  {
+    "id": "aug-hw-colloquial-016",
+    "query": "哎那个啥，费用预算表，名字带修订版的那个，麻烦搜一下",
+    "missing_keywords": ["费用预算表"]
+  },
+  {
+    "id": "aug-hw-colloquial-017",
+    "query": "搜一下那个客户拜访记录的文件，名字里头有十一月的",
+    "missing_keywords": ["客户拜访记录"]
+  },
+  {
+    "id": "aug-hw-colloquial-018",
+    "query": "放点歌，要那种喝酒聚会嗨起来那个感觉的",
+    "missing_keywords": ["喝酒聚会"]
+  },
+  {
+    "id": "aug-hw-colloquial-019",
+    "query": "诶那个报消单——哦不是，报销单啦，文件名带差旅的那个",
+    "missing_keywords": ["报销单"]
+  },
+  {
+    "id": "aug-hw-colloquial-020",
+    "query": "来点音乐，那种上班摸鱼假装认真其实放空的感觉",
+    "missing_keywords": ["上班摸鱼"]
+  },
+  {
+    "id": "aug-hw-colloquial-021",
+    "query": "嗯……那个投标文件的东西，名字里带最终版的，帮我找找",
+    "missing_keywords": ["投标文件"]
+  },
+  {
+    "id": "aug-hw-colloquial-022",
+    "query": "帮我搜一下那个进度汇报，文件名包含周报那俩字的",
+    "missing_keywords": ["进度汇报"]
+  },
+  {
+    "id": "aug-hw-colloquial-023",
+    "query": "放首歌，要那种心情特别烦躁听了能平静一点的",
+    "missing_keywords": ["烦躁"]
+  },
+  {
+    "id": "aug-hw-colloquial-024",
+    "query": "哦对了那个年终汇报PPT，文件名字带有领导审阅的那个，找一下",
+    "missing_keywords": ["年终汇报"]
+  },
+  {
+    "id": "aug-hw-colloquial-025",
+    "query": "来点歌，适合健身撸铁的，要很有力量感的那种",
+    "missing_keywords": ["健身撸铁"]
+  },
+  {
+    "id": "aug-hw-colloquial-026",
+    "query": "那个啥来着，团建活动方案，名字里有春季的，帮我翻出来",
+    "missing_keywords": ["团建活动方案"]
+  },
+  {
+    "id": "aug-hw-colloquial-027",
+    "query": "整几首歌，要那种失眠的夜里听着不那么难受的",
+    "missing_keywords": ["失眠"]
+  },
+  {
+    "id": "aug-hw-colloquial-028",
+    "query": "麻烦搜一下风险评估报告，文件名里头含有复核的那份",
+    "missing_keywords": ["风险评估报告"]
+  },
+  {
+    "id": "aug-hw-colloquial-029",
+    "query": "放个歌单，适合跟朋友一起吃火锅那种热热闹闹的",
+    "missing_keywords": ["吃火锅"]
+  },
+  {
+    "id": "aug-hw-colloquial-030",
+    "query": "哎帮我瞅瞅那个竞品分析，文件名里有调研两个字的那个",
+    "missing_keywords": ["竞品分析"]
+  }
+]

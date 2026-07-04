@@ -1,0 +1,152 @@
+[
+  {
+    "id": "aug-hw-zh-001",
+    "query": "帮我找下上个月的体检报告文件名里带复查的",
+    "missing_keywords": ["体检报告"]
+  },
+  {
+    "id": "aug-hw-zh-002",
+    "query": "那个项目复盘的文档名字里有Q3的，去年的",
+    "missing_keywords": ["项目复盘"]
+  },
+  {
+    "id": "aug-hw-zh-003",
+    "query": "找找培训材料和验收清单相关的文件名包含季度的",
+    "missing_keywords": ["培训材料", "验收清单"]
+  },
+  {
+    "id": "aug-hw-zh-004",
+    "query": "上半年的财务预算文件名带初稿的有哪些",
+    "missing_keywords": ["财务预算"]
+  },
+  {
+    "id": "aug-hw-zh-005",
+    "query": "麻烦帮我搜一下会议纪要名称里含运维的",
+    "missing_keywords": ["会议纪要"]
+  },
+  {
+    "id": "aug-hw-zh-006",
+    "query": "想找一下出差报销的单子，文件名里有审批的那种",
+    "missing_keywords": ["出差报销"]
+  },
+  {
+    "id": "aug-hw-zh-007",
+    "query": "周报文件名包含跨部门的，最近三个月的",
+    "missing_keywords": ["周报"]
+  },
+  {
+    "id": "aug-hw-zh-008",
+    "query": "帮我找年度总结的文档文件名带终版的",
+    "missing_keywords": ["年度总结"]
+  },
+  {
+    "id": "aug-hw-zh-009",
+    "query": "有没有绩效考核相关的文件名里有模板的",
+    "missing_keywords": ["绩效考核"]
+  },
+  {
+    "id": "aug-hw-zh-010",
+    "query": "那份简历模板名字里带校招的在哪儿",
+    "missing_keywords": ["简历模板"]
+  },
+  {
+    "id": "aug-hw-zh-011",
+    "query": "找一下采购清单文件名包含供应商的",
+    "missing_keywords": ["采购清单"]
+  },
+  {
+    "id": "aug-hw-zh-012",
+    "query": "旅行攻略的文档名称里含自驾的有几个",
+    "missing_keywords": ["旅行攻略"]
+  },
+  {
+    "id": "aug-hw-zh-013",
+    "query": "产品需求文件名里有v2的帮我列一下",
+    "missing_keywords": ["产品需求"]
+  },
+  {
+    "id": "aug-hw-zh-014",
+    "query": "课程笔记名字里带期末的那几个文件",
+    "missing_keywords": ["课程笔记"]
+  },
+  {
+    "id": "aug-hw-zh-015",
+    "query": "帮找一下实验数据文件名包含对照组的",
+    "missing_keywords": ["实验数据"]
+  },
+  {
+    "id": "aug-hw-zh-016",
+    "query": "合同附件的文档文件名带盖章的我要看一下",
+    "missing_keywords": ["合同附件"]
+  },
+  {
+    "id": "aug-hw-zh-017",
+    "query": "测试用例名称里含回归的文件，最近改过的",
+    "missing_keywords": ["测试用例"]
+  },
+  {
+    "id": "aug-hw-zh-018",
+    "query": "值班表文件名有节假日的那份在哪",
+    "missing_keywords": ["值班表"]
+  },
+  {
+    "id": "aug-hw-zh-019",
+    "query": "麻烦找找通讯录文件名里带备用的",
+    "missing_keywords": ["通讯录"]
+  },
+  {
+    "id": "aug-hw-zh-020",
+    "query": "想看下项目方案和预算表的文件，名字里有立项的那种",
+    "missing_keywords": ["项目方案", "预算表"]
+  },
+  {
+    "id": "aug-hw-zh-021",
+    "query": "去年Q4的运营报告，文件名包含对外的",
+    "missing_keywords": ["运营报告"]
+  },
+  {
+    "id": "aug-hw-zh-022",
+    "query": "那个装修报价单名称里含明细的文件帮我找一下",
+    "missing_keywords": ["装修报价单"]
+  },
+  {
+    "id": "aug-hw-zh-023",
+    "query": "用药记录文件名带随访的有没有",
+    "missing_keywords": ["用药记录"]
+  },
+  {
+    "id": "aug-hw-zh-024",
+    "query": "帮我搜一下安全培训的文件名里有考核的",
+    "missing_keywords": ["安全培训"]
+  },
+  {
+    "id": "aug-hw-zh-025",
+    "query": "这季度的客户反馈文件名包含投诉的想整理一下",
+    "missing_keywords": ["客户反馈"]
+  },
+  {
+    "id": "aug-hw-zh-026",
+    "query": "设计稿名字里有定稿的那几个文件在哪儿",
+    "missing_keywords": ["设计稿"]
+  },
+  {
+    "id": "aug-hw-zh-027",
+    "query": "月度计划文件名带执行的麻烦找一下",
+    "missing_keywords": ["月度计划"]
+  },
+  {
+    "id": "aug-hw-zh-028",
+    "query": "帮找资产清查文件名包含盘点的",
+    "missing_keywords": ["资产清查"]
+  },
+  {
+    "id": "aug-hw-zh-029",
+    "query": "入职材料名称里含背调的那份文件",
+    "missing_keywords": ["入职材料"]
+  },
+  {
+    "id": "aug-hw-zh-030",
+    "query": "有没有风险评估报告文件名里有专家评审的那种",
+    "missing_keywords": ["风险评估报告"]
+  }
+]

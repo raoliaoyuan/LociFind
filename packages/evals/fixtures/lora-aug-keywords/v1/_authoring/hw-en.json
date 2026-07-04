@@ -1,0 +1,152 @@
+[
+  {
+    "id": "aug-hw-en-001",
+    "query": "find me the onboarding checklist with handover in the filename from last quarter",
+    "missing_keywords": ["onboarding checklist"]
+  },
+  {
+    "id": "aug-hw-en-002",
+    "query": "where's that marketing plan, the one with filename containing roadmap",
+    "missing_keywords": ["marketing plan"]
+  },
+  {
+    "id": "aug-hw-en-003",
+    "query": "show me research paper and design review files named compliance",
+    "missing_keywords": ["research paper", "design review"]
+  },
+  {
+    "id": "aug-hw-en-004",
+    "query": "I'm looking for the annual budget document that has forecast in the file name",
+    "missing_keywords": ["annual budget"]
+  },
+  {
+    "id": "aug-hw-en-005",
+    "query": "the quarterly report from last year — file name has summary in it",
+    "missing_keywords": ["quarterly report"]
+  },
+  {
+    "id": "aug-hw-en-006",
+    "query": "can you pull up my expense report with the filename containing reimbursement",
+    "missing_keywords": ["expense report"]
+  },
+  {
+    "id": "aug-hw-en-007",
+    "query": "I need the project retrospective, specifically the one with lessons in the name",
+    "missing_keywords": ["project retrospective"]
+  },
+  {
+    "id": "aug-hw-en-008",
+    "query": "look up my travel itinerary files where the filename has booking in it",
+    "missing_keywords": ["travel itinerary"]
+  },
+  {
+    "id": "aug-hw-en-009",
+    "query": "show me the performance review with calibration in the file name, probably from Q3",
+    "missing_keywords": ["performance review"]
+  },
+  {
+    "id": "aug-hw-en-010",
+    "query": "where did I save the release notes — the file should have changelog in its name",
+    "missing_keywords": ["release notes"]
+  },
+  {
+    "id": "aug-hw-en-011",
+    "query": "fetch the training material that has workshop in the filename, from the new-hire batch",
+    "missing_keywords": ["training material"]
+  },
+  {
+    "id": "aug-hw-en-012",
+    "query": "I'm after the meeting notes with agenda in the file name, from the leadership sync",
+    "missing_keywords": ["meeting notes"]
+  },
+  {
+    "id": "aug-hw-en-013",
+    "query": "help me find the invoice summary, file name containing reconciliation",
+    "missing_keywords": ["invoice summary"]
+  },
+  {
+    "id": "aug-hw-en-014",
+    "query": "there's a design review somewhere with wireframe in its filename — can you find it",
+    "missing_keywords": ["design review"]
+  },
+  {
+    "id": "aug-hw-en-015",
+    "query": "what about the test cases that have regression in the file name",
+    "missing_keywords": ["test cases"]
+  },
+  {
+    "id": "aug-hw-en-016",
+    "query": "get me the project proposal with the filename containing timeline, from the infrastructure team",
+    "missing_keywords": ["project proposal"]
+  },
+  {
+    "id": "aug-hw-en-017",
+    "query": "I saved a competitor analysis somewhere — file name has benchmark in it",
+    "missing_keywords": ["competitor analysis"]
+  },
+  {
+    "id": "aug-hw-en-018",
+    "query": "find all budget planning docs with allocation in the filename, from this fiscal year",
+    "missing_keywords": ["budget planning"]
+  },
+  {
+    "id": "aug-hw-en-019",
+    "query": "the product roadmap and feature spec — both named prioritization somewhere",
+    "missing_keywords": ["product roadmap", "feature spec"]
+  },
+  {
+    "id": "aug-hw-en-020",
+    "query": "where's the interview feedback file with the name containing scorecard",
+    "missing_keywords": ["interview feedback"]
+  },
+  {
+    "id": "aug-hw-en-021",
+    "query": "I need the risk assessment document that has mitigation in the filename",
+    "missing_keywords": ["risk assessment"]
+  },
+  {
+    "id": "aug-hw-en-022",
+    "query": "any stakeholder update files with filename containing executive from last sprint",
+    "missing_keywords": ["stakeholder update"]
+  },
+  {
+    "id": "aug-hw-en-023",
+    "query": "pull up the vendor contract where the file name has renewal in it",
+    "missing_keywords": ["vendor contract"]
+  },
+  {
+    "id": "aug-hw-en-024",
+    "query": "show me the user research notes — the ones with the word findings in their filename",
+    "missing_keywords": ["user research notes"]
+  },
+  {
+    "id": "aug-hw-en-025",
+    "query": "look for the system architecture diagram that has deployment in the file name",
+    "missing_keywords": ["system architecture diagram"]
+  },
+  {
+    "id": "aug-hw-en-026",
+    "query": "I'm looking for the content calendar and social media plan both with the name containing schedule",
+    "missing_keywords": ["content calendar", "social media plan"]
+  },
+  {
+    "id": "aug-hw-en-027",
+    "query": "grab the compliance checklist — filename containing audit — from the legal folder",
+    "missing_keywords": ["compliance checklist"]
+  },
+  {
+    "id": "aug-hw-en-028",
+    "query": "where is the hiring plan that has headcount in the file name, for next year",
+    "missing_keywords": ["hiring plan"]
+  },
+  {
+    "id": "aug-hw-en-029",
+    "query": "I need those incident report documents where the filename has postmortem in it",
+    "missing_keywords": ["incident report"]
+  },
+  {
+    "id": "aug-hw-en-030",
+    "query": "find my sprint planning notes that have the word velocity in the filename",
+    "missing_keywords": ["sprint planning notes"]
+  }
+]
