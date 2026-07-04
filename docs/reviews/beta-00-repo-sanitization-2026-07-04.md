@@ -42,6 +42,12 @@
 2. **接受残留直接公开**——用户名级信息公开风险低，如不介意 `Roger/raoli` 出现在历史中可直接转公开。
 3. **git filter-repo 重写**——保历史又除残留，但重写破坏所有既有 clone/commit 引用，工程成本最高，不建议。
 
+### §4 执行记录（2026-07-04 同日，用户拍板选项 1）
+
+- 原私有仓库改名 **`raoliaoyuan/LociFind-archive`**（保持私有；完整 925 commits 历史、PR、Release 全保留作内部档案，此后冻结）。
+- 新建公开 **`raoliaoyuan/LociFind`**（沿用既有文档/AboutDialog 中的 canonical URL），main 以单次「初始开源发布」orphan commit `bc47473` 起步——树与脱敏后 HEAD `bfdd4a9` 逐字节一致；公开面 0 tag、仅 main 分支、1 commit（gh API 验证）。
+- 本地：`main` 切换到 orphan 主线并 track 新 origin；旧主线留 `full-history` 本地书签 + `archive` 远端。后续开发一律走公开 main；不选直接翻转旧仓库是因 PR diff / 事件流即使 force-push 也会残留历史。
+
 ## 5. BETA-00 收口状态
 
 LICENSE 双许可 ✅ / third-party 台账差异 0 ✅ / Everything 条款核查 ✅ / PRIVACY.md ✅ / 商标使用规范（不暗示背书）复核 ✅ / **工作区脱敏 ✅（本报告）**。BETA-00 全部验收项完成；唯一开放项 = §4 历史决策，归属「转公开」操作时点。

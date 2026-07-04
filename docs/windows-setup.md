@@ -18,22 +18,16 @@
 
 ## 1. 同步代码
 
-### 1.0 先认证（仓库是**私有**的，必做）
+### 1.0 认证（clone 免认证；push 需登录）
 
-`raoliaoyuan/LociFind` 是 **私有仓库**，且 macOS 上的认证不会带到 Windows——不先认证，`git clone` 会直接被拒。用 HTTPS 即可，**不必配 SSH key**。三选一，推荐第 1 个最省心：
+`raoliaoyuan/LociFind` 已于 2026-07-04 转**公开仓库**（此前的私有认证步骤作废）：**clone / pull 无需任何认证**。若这台机器要 **push**，用 GitHub CLI 登录一次即可：
 
-1. **GitHub CLI（推荐）**——`gh auth login` 会自动配好 git 凭据，之后 clone/pull/push 全程免手输：
-   ```powershell
-   winget install --id GitHub.cli
-   gh auth login        # 选 GitHub.com → HTTPS → Login with a web browser
-   ```
-2. **Git Credential Manager**（Git for Windows 自带）——直接 clone，首次弹浏览器登录窗，登录后自动存凭据，无需手建 token：
-   ```powershell
-   git clone https://github.com/raoliaoyuan/LociFind.git   # 首次弹窗登录
-   ```
-3. **Personal Access Token**——GitHub Settings → Developer settings → Personal access tokens，勾 `repo` scope；clone 时用户名填 GitHub 用户名、密码处粘贴 token。
+```powershell
+winget install --id GitHub.cli
+gh auth login        # 选 GitHub.com → HTTPS → Login with a web browser
+```
 
-> 仓库设置已确认：私有 / 默认分支 `main` / **无分支保护**（可直接 push 到 main，无需 PR）/ 你的账号是 ADMIN，读写都没问题。
+> 仓库设置：公开 / 默认分支 `main` / 无分支保护（协作者可直接 push）。完整开发历史在私有归档仓库 `LociFind-archive`（公开仓库自单次「初始开源」commit 起步，详 [脱敏核查报告 §4](reviews/beta-00-repo-sanitization-2026-07-04.md)）。
 
 ### 1.1 clone / pull
 
@@ -44,11 +38,11 @@ cd LociFind
 git pull origin main
 ```
 
-确认拿到最新（应含 BETA-15A）：
+确认拿到最新：
 
 ```powershell
 git log --oneline -1
-# 期望看到最新一条是 "收工: BETA-15A 同义词召回评测集 done ..." 或更新
+# 与 GitHub 上 main 最新 commit 一致即可（公开仓库历史自 2026-07-04「初始开源发布」起步）
 ```
 
 **行尾**：仓库用 `.gitattributes` 统一 LF。Windows 上 git 默认 `core.autocrlf=true` 可能改行尾——若 `git status` 显示大量"伪改动"，设 `git config core.autocrlf false` 后重新 checkout。
