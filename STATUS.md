@@ -8,8 +8,8 @@
 
 - **阶段**：B（Beta）进行中；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 97.7%**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**开源化整线落地**——双许可 + PRIVACY + 脱敏（BETA-00 done）→ 仓库转公开（orphan 首发，archive 冻结保全史）→ CONTRIBUTING/模板 + install.md/渠道评估（BETA-10/10A 文档层）→ **v0.9.14 首个公开发版 tag 已推、CI 构建中**（收工时未出结果，收尾步骤见下一步 ③）。前一轮：evals 97.7% + BETA-29 v2 代码层完。
-- **下一步 top-3**：① 设计伙伴/首个真实部署主动获取（护城河 P0，开源免费降低试用门槛）；② BETA-33 cycle 9 真机验证（随下次发版，验证面含 BETA-43 出处 + BETA-12 卸载/升级 + BETA-29 草稿 v1+v2）；③ v0.9.14 发版收尾（查 CI 结果 → changelog → Scoop bucket，步骤已备好）。
+- **当前 task**：**开源化整线落地 + 首个公开发版 done**——双许可 + PRIVACY + 脱敏（BETA-00 done）→ 仓库转公开（orphan 首发，archive 冻结保全史）→ CONTRIBUTING/模板 + install.md/渠道评估（BETA-10/10A 文档层）→ **v0.9.14 CI 成功（NSIS hook 首次真实构建通过）+ changelog 补全 + Scoop bucket `scoop-locifind` 上线**。前一轮：evals 97.7% + BETA-29 v2 代码层完。
+- **下一步 top-3**：① 设计伙伴/首个真实部署主动获取（护城河 P0，开源免费降低试用门槛）；② BETA-33 cycle 9 真机验证（随下次发版，验证面含 BETA-43 出处 + BETA-12 卸载/升级 + BETA-29 草稿 v1+v2）；③ v0.9.14 装机真机验证（cycle 9 六场景 + BETA-10A「下载→放行→装→可用」+ Scoop 装机路径，随下次上机）。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；Class B 仅剩 1 项：clarify options 结构口径（危险动作给不给「在访达显示/取消」、模糊查询给不给类型/动作 options，8 条，不阻塞出场线）。
 
 ## 当前 Task
@@ -22,7 +22,7 @@
 
 1. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
 2. **BETA-33 cycle 9 真机验证**：随下次发版装机，按 [manual-test-scenarios](docs/manual-test-scenarios.md) 跑六场景；本轮验证面另含 BETA-43（出处/`read_document`/审计导出，[playbooks README](docs/playbooks/README.md) 第 8/9 条）+ **BETA-12 卸载清理**（场景 5「升级零数据损失」为发版阻断；NSIS hook 首次真实构建即本次发版 CI）+ **BETA-29 意图草稿 v1（6 场景）+ v2（7 场景）**。
-3. **v0.9.14 发版收尾**（tag 已推、CI run 28708792924 收工时 in_progress）：① 查结果 `gh run view 28708792924`；② 成功后 `gh release edit v0.9.14 --notes-file docs/reviews/release-notes-v0.9.14-draft.md`；③ 按 [scripts/packaging/scoop/README.md](scripts/packaging/scoop/README.md) 填 hash 建 `scoop-locifind` bucket 仓库；④ 失败则看日志修（主要风险 = NSIS hook 首次真实构建）。装机包供 cycle 9（下一步 ②）与 BETA-10A 真机验证用。
+3. **v0.9.14 发版 done**：CI 成功（run 28708792924，NSIS hook 首次真实构建通过）+ [Release](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.14) changelog 补全（prerelease）+ Scoop bucket [scoop-locifind](https://github.com/raoliaoyuan/scoop-locifind) 上线（`scoop bucket add locifind <url> && scoop install locifind`）。装机包供下一步 ② 真机验证。
 4. **BETA-10 剩余**：macOS DMG 产物 CI（下次触碰 macOS 侧时）；winget 待 BETA-14 后 / Homebrew tap 待 DMG CI。
 5. **BETA-40 真实内网证据**：唯一剩余验收项，依赖 ①。
 6. **剩余 23 条 partial**（不阻塞出场线，明细见[复盘 §3.5](docs/reviews/beta-14-gap-inventory-2026-07-04.md)）：clarify options 结构口径 8 条（待拍板，见「阻塞」）；v0.5 老账 10 条（hint 双语形态 / synthetic-artist ×4 / markdown ft 等，卡 §6.5 豁免额度、攒批处理）；零星 5 条（碳中和分词 / 保密协议 ft（d3 标注自身不一致）/ 备份文件 两难 / 裸 no / music 目录 hint 形态）。
@@ -50,8 +50,8 @@
 **续 3（同日转公开，用户拍板 orphan 首发）**：私有仓库改名 `LociFind-archive`（冻结保全史含 PR/Release）；新建公开 `LociFind`（canonical URL 不变）以 orphan commit `bc47473` 首发（树=脱敏 HEAD 逐字节一致；公开面 0 tag / 1 commit，gh API 验证）；本地 main 切 orphan 主线 + `full-history` 书签 + `archive` 远端；windows-setup.md 私有认证节改公开口径。
 **续 4（同日开源配套 done）**：CONTRIBUTING.md（双许可贡献条款 + 验证闸门 + 范围红线 + 隐私红线）、issue 模板 ×2（bug 含日志脱敏提醒 / feature 含「不做分析层」范围自查）+ Security Advisories 引导 + PR 模板（闸门 checklist + 许可确认）、README 贡献节。
 **续 5（同日 BETA-10/10A 文档层 done）**：[install.md](docs/install.md)（SmartScreen 放行 + SHA256 校验 + 升级/卸载、Gatekeeper 三路径〔含 macOS 15 新口径〕+ ad-hoc、源码构建、可选模型）；[渠道评估](docs/reviews/beta-10-distribution-channels-2026-07-04.md)（Scoop 先行→winget 待稳定期→Homebrew tap 待 DMG CI）；README 安装节 + Release body 挂链。两卡转 in_progress，剩 DMG CI + 真机安装验证。
-**续 6（同日发版启动，收工时 CI 未出结果）**：bump v0.9.14（tauri.conf + Cargo.toml + lock 同步 `--locked` 验证）、tag 推公开 origin 触发 release-windows.yml（run 28708792924，新仓库冷缓存）；changelog 草稿入 [release-notes-v0.9.14-draft.md](docs/reviews/release-notes-v0.9.14-draft.md)、Scoop bucket 种子（manifest 含 installer/uninstaller 脚本〔实测安装路径 `%LOCALAPPDATA%\LociFind`〕+ autoupdate）入 [scripts/packaging/scoop/](scripts/packaging/scoop/README.md)。
-**未尽事宜**：发版收尾四步见下一步 ③。
+**续 6（同日首个公开发版 done）**：bump v0.9.14（tauri.conf + Cargo.toml + lock `--locked` 验证）、tag 推公开 origin 触发 release-windows.yml（run 28708792924 **success**，NSIS 卸载 hook 首次真实构建通过、安装包 + sha256 出）；`gh release edit` 补 changelog（[草稿](docs/reviews/release-notes-v0.9.14-draft.md)，prerelease）；Scoop bucket **仓库 [scoop-locifind](https://github.com/raoliaoyuan/scoop-locifind) 建成上线**（manifest 填真 hash `4e525b…`、installer/uninstaller 脚本按实测 `%LOCALAPPDATA%\LociFind` 路径、autoupdate；远端 manifest JSON 校验有效）；种子入 [scripts/packaging/scoop/](scripts/packaging/scoop/README.md)。
+**未尽事宜**：v0.9.14 真机验证（cycle 9 + BETA-10A + Scoop 装机路径）随下次上机，归下一步 ②。
 
 ### 2026-07-04 IX+X — Claude Code (Fable 5) — 两轮收割至 97.7% + 四项口径拍板落地 + BETA-29 v2
 

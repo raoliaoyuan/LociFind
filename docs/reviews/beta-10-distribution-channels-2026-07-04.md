@@ -45,6 +45,12 @@
 | 渠道评估 | ✅ done（本文） | 2026-07-04 |
 | macOS DMG 产物 CI（未签名 + ad-hoc） | BETA-10 剩余 | 下次触碰 macOS 侧时 |
 | 双平台真机「下载→放行→安装→可用」验证（§6.3 指标） | BETA-10/10A 剩余 | 随下次发版 / cycle 9 |
-| Scoop 自建 bucket manifest | BETA-10A 后续 | 下次发版后 |
+| Scoop 自建 bucket manifest | ✅ done（[scoop-locifind](https://github.com/raoliaoyuan/scoop-locifind)，随 v0.9.14） | 2026-07-04 |
 | winget 首个 manifest | BETA-10A 后续 | BETA-14 后稳定期 |
 | Homebrew 自建 tap cask | BETA-10 后续 | DMG CI 后 |
+
+## 执行记录（2026-07-04）
+
+- **v0.9.14 = 首个公开 Release**：release-windows.yml 在新公开仓库跑通（run 28708792924 success），NSIS 卸载 hook 首次真实构建通过；产物 `LociFind_0.9.14_x64-setup.exe`（sha256 `4e525b56…`），Release changelog 经 `gh release edit` 补全（prerelease）。
+- **Scoop 上线**：公开仓库 [raoliaoyuan/scoop-locifind](https://github.com/raoliaoyuan/scoop-locifind)，`bucket/locifind.json` 填真 hash + installer/uninstaller 脚本（安装路径按本机实测 `%LOCALAPPDATA%\LociFind`）+ autoupdate；远端 manifest JSON 校验有效。用户命令：`scoop bucket add locifind https://github.com/raoliaoyuan/scoop-locifind && scoop install locifind`。bucket 源文件另存仓库内 `scripts/packaging/scoop/` 便于同步维护。
+- **待真机确认**：Scoop 装机全流程（install→运行→uninstall 触发应用卸载器清数据）尚未真机验证，归 cycle 9。

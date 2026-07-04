@@ -11,7 +11,7 @@
     "architecture": {
         "64bit": {
             "url": "https://github.com/raoliaoyuan/LociFind/releases/download/v0.9.14/LociFind_0.9.14_x64-setup.exe",
-            "hash": "HASH_PLACEHOLDER"
+            "hash": "4e525b564e6243ecfa4daa7f6a765de68657c1afa821043fdc5f2045f3daf0bc"
         }
     },
     "installer": {
