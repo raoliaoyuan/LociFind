@@ -5,6 +5,14 @@
 > 后续会话的详录写入 session-details-YYYY-MM.md、溢出摘要滚动追加到本文件。
 
 ---
+### 2026-07-04 VIII — Claude Code (Fable 5) — §6 缺口盘点 + 三刀收割跨过 90% 出场线
+
+**承接**：STATUS 下一步 ③（§6 90% 出场线评估，BETA-14 前决策）；用户指令"盘点 1.9pp 缺口"后认可三刀路线。
+**关键发现**：119 partial 按根因重切出两个未盘过的大簇（media title 残段 17 / Refine delta 16）——「纯 parser 已见底」结论被推翻，无需 BETA-29 换口径即可过线。
+**产出**：① media title 兜底只收"点名"（`is_descriptor_segment`，质量/流派词 lexicon 单一来源）+ artist 停词「时长」；② refine 设值 scope 限定 / artist 兜底 / sort 附加解耦 / 多字段 clear 语序 + `from last`→modified 撤销；③ file_action rename 混排介词（v0.5 3 条转正）/ 目的地路径与 target 分离 / external drive 映射；④ 标注对齐 17 条（d7×12 对齐 v0.5 主流与 wire 标量约定、d6×5 `~/Desktop` 机器无关化），均为 v0.9 coverage 分片、v0.5 未动。
+**结果**：v0.9 = **927/73/0（92.7%）**、v0.5 = **478/22/0**；三轮逐 case 对比零回归。新增单测 15；intent-parser 215 / evals 全 gate / server 88 / desktop 165 全绿；clippy/fmt 净。
+**未尽事宜**：3 项口径拍板（language / Clarify 文案 / 复数归一，入 Class B）；时间表达簇 ~17 条按反馈驱动排期；出场判定余双平台真机复跑。复盘：[beta-14-gap-inventory-2026-07-04.md](../reviews/beta-14-gap-inventory-2026-07-04.md)。
+
 ### 2026-07-04 VII — Claude Code — BETA-12 卸载流程 + BETA-29 意图草稿 v1
 
 **承接**：7-04 VI 后 STATUS 下一步 ③（BETA-12 无阻塞代码卡）+ 用户点名接开 BETA-29。
