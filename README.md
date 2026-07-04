@@ -90,3 +90,7 @@ LociFind/
 ## 隐私
 
 本地优先：文件名、路径、内容、搜索词、索引数据全部留在本机，无遥测、默认不联网。详见 [PRIVACY.md](./PRIVACY.md)。
+
+## 贡献
+
+欢迎 issue 与 PR——开发环境、验证闸门、双许可贡献条款见 [CONTRIBUTING.md](./CONTRIBUTING.md)。安全漏洞请走 GitHub Security Advisories 私下报告。
