@@ -108,6 +108,15 @@ export function useModelDownload(kind: ModelKind = 'embedding'): UseModelDownloa
         }
       );
       if (!mounted) { unlistenError(); unlistenDone(); unlistenProgress(); return; }
+
+      // v0.9.16 真机踩坑：切步重挂后前端回 idle、但后端下载还在进行（守卫持有）——
+      // 用户看不到「取消」也无法导入。mount 时查后端 in-flight 恢复「下载中」态。
+      try {
+        const inFlight = await invoke<boolean>('model_download_in_flight', { kind });
+        if (mounted && inFlight) setStatus('downloading');
+      } catch {
+        // 命令不可用（旧后端）时静默降级为原行为。
+      }
     })();
 
     return () => {

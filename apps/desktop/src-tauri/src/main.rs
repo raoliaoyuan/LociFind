@@ -667,6 +667,7 @@ fn main() {
             model_download::cancel_generation_download,
             model_download::discover_local_model,
             model_download::import_local_model,
+            model_download::model_download_in_flight,
             user_synonyms::get_user_synonyms,
             user_synonyms::add_user_synonym,
             user_synonyms::update_user_synonym,

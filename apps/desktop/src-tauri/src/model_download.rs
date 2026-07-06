@@ -49,11 +49,16 @@ pub enum ModelKind {
 }
 
 impl ModelKind {
-    fn url(self) -> &'static str {
-        match self {
+    /// 下载 URL 链：HF 官方主源 + 镜像兜底（v0.9.16 真机反馈：部分网络 HF 直连
+    /// 挂起/极慢——`hf-mirror.com` 是同路径结构的公开镜像，主源失败时自动切换；
+    /// 用户取消不切换。联网点已在 PRIVACY.md 声明（仅用户主动触发）。
+    fn urls(self) -> [String; 2] {
+        let primary = match self {
             Self::Embedding => EMBEDDING_HF_URL,
             Self::Generation => GENERATION_HF_URL,
-        }
+        };
+        let mirror = primary.replace("https://huggingface.co/", "https://hf-mirror.com/");
+        [primary.to_owned(), mirror]
     }
     fn filename(self) -> &'static str {
         match self {
@@ -185,7 +190,11 @@ async fn download_stream(
     cancel: &AtomicBool,
     mut emit_progress: impl FnMut(u64, Option<u64>),
 ) -> Result<(), String> {
+    // connect_timeout（v0.9.16 真机踩坑）：HF 直连在部分网络会在 TCP/TLS 阶段长挂，
+    // 旧配置只有整请求 300s timeout → in-flight 守卫被占满 5 分钟、取消也无效
+    // （cancel flag 只在 chunk loop 检查）。连接阶段 15s 快速失败 → 走镜像兜底。
     let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(300))
         .build()
         .map_err(|e| format!("reqwest client build 失败: {e}"))?;
@@ -276,18 +285,38 @@ async fn download_model_impl(app: AppHandle, kind: ModelKind) -> Result<(), Stri
         return Ok(());
     }
 
-    let app_for_progress = app.clone();
     let cancel = cancel_flag(kind);
-    let result = download_stream(
-        kind.url(),
-        &target,
-        &partial,
-        cancel,
-        move |downloaded, total| {
-            emit_progress(&app_for_progress, kind, downloaded, total);
-        },
-    )
-    .await;
+    // URL 链依次尝试（主源 → 镜像）；每次尝试用 select 与取消轮询竞速——
+    // v0.9.16 真机踩坑：连接阶段挂起时 chunk loop 里的 cancel 检查永远走不到，
+    // 「取消」失效、守卫被占满 timeout。select 分支 drop 下载 future（连带关
+    // file handle）后清 partial，取消即刻生效。
+    let mut result: Result<(), String> = Err("无可用下载源".to_string());
+    for url in kind.urls() {
+        let app_for_progress = app.clone();
+        let attempt = tokio::select! {
+            r = download_stream(&url, &target, &partial, cancel, move |downloaded, total| {
+                emit_progress(&app_for_progress, kind, downloaded, total);
+            }) => r,
+            () = wait_cancelled(cancel) => {
+                cleanup_partial(&partial).await;
+                Err("用户取消下载".to_string())
+            }
+        };
+        match attempt {
+            Ok(()) => {
+                result = Ok(());
+                break;
+            }
+            Err(reason) if reason == "用户取消下载" => {
+                result = Err(reason);
+                break; // 用户取消：不试镜像
+            }
+            Err(reason) => {
+                tracing::warn!(url = %url, %reason, "模型下载源失败，尝试下一源");
+                result = Err(reason);
+            }
+        }
+    }
 
     match result {
         Ok(()) => {
@@ -298,6 +327,16 @@ async fn download_model_impl(app: AppHandle, kind: ModelKind) -> Result<(), Stri
             emit_error(&app, kind, &reason);
             Err(reason)
         }
+    }
+}
+
+/// 取消轮询：cancel flag 置位后 ≤300ms 返回（与下载 future select 竞速用）。
+async fn wait_cancelled(cancel: &AtomicBool) {
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
     }
 }
 
@@ -332,6 +371,15 @@ pub async fn download_generation_model(app: AppHandle) -> Result<(), String> {
 pub fn cancel_generation_download() -> Result<(), String> {
     GENERATION_CANCEL.store(true, Ordering::SeqCst);
     Ok(())
+}
+
+/// 该模型是否有下载/导入在后端进行中（v0.9.16 真机踩坑：前端切步重挂后状态回
+/// idle、与后端守卫脱节——用户看不到「取消」按钮、也无法导入。组件 mount 时查
+/// 此命令恢复「下载中」态）。
+#[tauri::command]
+pub fn model_download_in_flight(kind: String) -> Result<bool, String> {
+    let kind = parse_kind(&kind)?;
+    Ok(in_flight(kind).load(Ordering::SeqCst))
 }
 
 // ===================== 2026-07-06（cycle 9 真机反馈）：模型本地发现 + 导入 =====================
@@ -473,7 +521,9 @@ pub async fn import_local_model(
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
-        return Err("该模型正在下载/导入中，请先等待或取消".to_string());
+        return Err(
+            "该模型有下载/导入正在进行——若此前的下载卡住了，请先点「取消」再重试导入".to_string(),
+        );
     }
     let _guard = InFlightGuard(kind);
 
@@ -533,6 +583,37 @@ mod tests {
     // 注：tauri AppHandle 不易在单测中构造，本模块单测仅覆盖纯逻辑路径
     // （cancel flag + download_stream 写入/重命名）。端到端 tauri command 行为由
     // 真机手测覆盖（spec §2.2.1 Mac self-test）。
+
+    #[tokio::test]
+    async fn wait_cancelled_returns_promptly_after_flag_set() {
+        // v0.9.16 真机踩坑回归：连接阶段挂起时取消必须仍能生效——wait_cancelled 与
+        // 下载 future select 竞速，flag 置位后须在轮询间隔（300ms）+余量内返回。
+        static FLAG: AtomicBool = AtomicBool::new(false);
+        FLAG.store(false, Ordering::SeqCst);
+        let waiter = tokio::spawn(async { wait_cancelled(&FLAG).await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!waiter.is_finished(), "flag 未置位时不应返回");
+        FLAG.store(true, Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_secs(2), waiter)
+            .await
+            .expect("flag 置位后应在 2s 内返回")
+            .expect("waiter 不应 panic");
+    }
+
+    #[test]
+    fn urls_chain_is_primary_then_mirror() {
+        // 镜像兜底：链上第一条是 HF 主源、第二条是同路径的 hf-mirror。
+        for kind in [ModelKind::Embedding, ModelKind::Generation] {
+            let [primary, mirror] = kind.urls();
+            assert!(primary.starts_with("https://huggingface.co/"), "{primary}");
+            assert!(mirror.starts_with("https://hf-mirror.com/"), "{mirror}");
+            assert_eq!(
+                primary.replace("https://huggingface.co/", ""),
+                mirror.replace("https://hf-mirror.com/", ""),
+                "镜像应只换 host、路径一致"
+            );
+        }
+    }
 
     #[test]
     fn cancel_flag_can_be_set_and_cleared() {
