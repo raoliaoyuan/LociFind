@@ -135,6 +135,27 @@ export function SemanticPane({
         )}
       </div>
 
+      {/* BETA-48：embedding 路径覆盖 UI（与下方生成模型对称）。此前该字段只能手工改
+          settings.json 且会被 UI 保存冲掉；接口透传修复 + 一并暴露。 */}
+      <div className="prefs-field">
+        <label className="prefs-label">语义模型路径覆盖（留空用默认）</label>
+        <input
+          type="text"
+          className="prefs-input"
+          value={settings.embedding_model_path ?? ""}
+          onChange={(e) =>
+            setSettings({
+              ...settings,
+              embedding_model_path: e.target.value || null,
+            })
+          }
+          placeholder="默认：数据目录/models/embeddinggemma-300m-q8_0.gguf"
+        />
+        <p className="prefs-hint">
+          修改路径后建议重启应用生效。留空时默认从上方路径查找。
+        </p>
+      </div>
+
       <div className="prefs-field">
         <label className="prefs-label">生成模型路径覆盖（留空用默认）</label>
         <input

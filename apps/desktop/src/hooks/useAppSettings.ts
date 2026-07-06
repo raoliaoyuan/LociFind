@@ -21,6 +21,10 @@ export interface AppSettings {
   enable_model_fallback: boolean;
   enable_tracing: boolean;
   model_path: string | null;
+  /** BETA-48：embedding 模型路径覆盖（null = 默认数据目录 models/）。
+   *  此前接口缺该字段，`update_settings` 全量覆写会把用户手工写进
+   *  settings.json 的值经 serde default 静默冲掉——必须透传。 */
+  embedding_model_path: string | null;
   semantic_similarity_floor: number | null;
   semantic_weight: number | null;
   index_roots: string[];

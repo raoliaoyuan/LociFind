@@ -8,18 +8,18 @@
 
 - **阶段**：B（Beta）进行中；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**BETA-47 选项页重构 done（代码层）**——七 tab（Everything / Windows 平台 tab 仅 Windows 显示）+ `enable_everything` 三处 es.exe 调用点门控 + PreferencesDialog 1579→513 行拆文件；desktop 171 全过。待随下次发版真机验证。
-- **下一步 top-3**：① v0.9.17 + BETA-47 真机验证（用户进行中：下载取消/镜像兜底/三行布局/卸载保模型/零索引空态/Everything tab 两态/升级零损失）；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ 双平台真机复跑填 [beta-exit.md](docs/reviews/beta-exit.md) TODO 格。
-- **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；Class B 新 1 条待拍板（Everything 音乐全盘发现 vs BETA-46 零索引语义，见下）。
+- **当前 task**：**BETA-47/48/49 done（代码层）**——选项页七 tab + `enable_everything` 三处 es.exe 门控 + 拆文件（47）；`embedding_model_path` 前端透传修复（48）；**音乐发现按 roots 过滤**（49，方案 A 拍板落地：越界不入库、空 roots 不 spawn es.exe）。待随下次发版真机验证。
+- **下一步 top-3**：① v0.9.17 + BETA-47/49 真机验证（用户进行中：下载取消/镜像兜底/三行布局/卸载保模型/零索引空态/Everything tab 两态/音乐发现不越界/升级零损失）；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ 双平台真机复跑填 [beta-exit.md](docs/reviews/beta-exit.md) TODO 格。
+- **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（音乐全盘发现语义 2026-07-06 方案 A〔按 roots 过滤〕拍板并落地）。
 
 ## 当前 Task
 
-**2026-07-06 IV（最新）**：**BETA-47 选项页重构（代码层 done）**。① `enable_everything` 设置（默认开、旧配置零回归）+ **三处 es.exe 调用点全门控**：搜索后端条件注册（关闭需重启，与 model_path 口径一致）、索引期音乐全盘发现（live-read、关闭回退目录扫描，local-index 新 `..._and_discovery` 变体 + phase 级回归测试）、BETA-45 模型本地发现（live-read）；新命令 `check_everything_available`（检测与开关独立、非 Windows 恒 false）。② 选项页拆**七 tab**：常规 / 索引 / Everything（检测+开关+安装引导）/ 语义召回（模型管理归位：生成模型 fallback/下载/路径覆盖迁入）/ Windows（WSearch 检测+索引选项）/ 隐私与记录（+完整隐私面板入口）/ 杂项（同义词入口）；平台 tab 仅 Windows 显示。③ PreferencesDialog.tsx 1579→513 行，面板拆 `components/preferences/` 九文件。desktop **171**（+1）/ local-index 24（+1）全过 + tsc/vite/clippy/fmt 净。**待真机**：Everything tab 两态（装/没装 es.exe）+ 开关行为。
+**2026-07-06 V（最新）**：**BETA-48 修复 + BETA-49 音乐发现按 roots 过滤（拍板落地）**。① 用户拍板**方案 A**：全盘发现结果按生效音乐 roots 过滤后入库——local-index 三处发现分支统一（`filter_discovered_to_roots` 纯函数：Windows 大小写/分隔符归一 + root+分隔符判界防 `Music2` 误挂 `Music`）+ **空 roots 直接跳过发现器**（零索引不 spawn es.exe；顺带消除单测/文档-only 重建路径的全盘枚举噪声）；旧库越界记录沿用既有「生效目录之外」提示 + purge 清理口径、不主动删。行为变更测试面：改写发现入库测试 + 计数 mock（空 roots 零调用）+ 纯函数边界测试。② BETA-48：前端 AppSettings 补 `embedding_model_path` 透传（修 UI 保存冲掉手工值）+ 语义召回 tab 暴露「语义模型路径覆盖」。③ UI 文案同步（「全盘发现」→「快速发现（仅限所选目录）」）。local-index **26**（+2）/ desktop 全量 exit 0 + clippy/fmt/tsc/vite 净。**待真机**：音乐发现不越界 + Everything tab 两态（随 BETA-47 一并验）。
 
 ## 下一步
 
 1. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
-2. **BETA-33 cycle 9 真机验证**：随下次发版装机，按 [manual-test-scenarios](docs/manual-test-scenarios.md) 跑六场景；本轮验证面另含 BETA-43（出处/`read_document`/审计导出，[playbooks README](docs/playbooks/README.md) 第 8/9 条）+ **BETA-12 卸载清理**（场景 5「升级零数据损失」为发版阻断；NSIS hook 首次真实构建即本次发版 CI）+ **BETA-29 意图草稿 v1（6 场景）+ v2（7 场景）**+ **BETA-47 选项页**（七 tab / Everything 检测两态 / 开关关闭后音乐发现回退 + 重启后 Everything 臂消失）。
+2. **BETA-33 cycle 9 真机验证**：随下次发版装机，按 [manual-test-scenarios](docs/manual-test-scenarios.md) 跑六场景；本轮验证面另含 BETA-43（出处/`read_document`/审计导出，[playbooks README](docs/playbooks/README.md) 第 8/9 条）+ **BETA-12 卸载清理**（场景 5「升级零数据损失」为发版阻断；NSIS hook 首次真实构建即本次发版 CI）+ **BETA-29 意图草稿 v1（6 场景）+ v2（7 场景）**+ **BETA-47 选项页**（七 tab / Everything 检测两态 / 开关关闭后音乐发现回退 + 重启后 Everything 臂消失）+ **BETA-49 音乐发现不越界**（仅生效目录内音频入库）。
 3. **v0.9.15 发版 done（并发首版）**：windows+macos 双 workflow 同 tag 并发均 success，[Release](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.15) 含 exe + DMG（aarch64）+ changelog；macOS DMG CI 首验通过。用户真机测试进行中；**BETA-45/46 改动未随包**、待下次发版验证。
 4. **BETA-10 剩余**：macOS DMG 产物 CI done 且 **v0.9.15 首验通过**；剩 macOS 真机放行验证（§6.3）；winget 待 BETA-14 后 / Homebrew tap 可启动（DMG CI 已跑通）。
 5. **BETA-40 真实内网证据**：唯一剩余验收项，依赖 ①。
@@ -32,11 +32,19 @@
 ## 阻塞 / 待用户决策
 
 - **Class A（外部条件，阻塞出场评测，不阻塞代码）**：仅剩 BETA-09(a)/MVP-26/28 双平台 evals——需 Windows 真机 + 完整 Spotlight 索引 macOS。~~Apple Developer / 证书 / 域名 / 商标~~ **已取消（2026-07-04 开源免费拍板**，分发改 GitHub Releases 开源口径，[ROADMAP §5](./ROADMAP.md)）。
-- **Class B（产品决策，不阻塞 §6 出场线）**：新 1 条——**Everything 音乐「全盘发现」会索引 index_roots 之外的全盘音频**（BETA-01A 设计如此），与 BETA-46「默认零索引 / 未经同意不索引」语义有张力；是否改为发现结果按 roots 过滤、或维持现状仅文案明示，待拍板（BETA-47 会话顺带发现）。~~clarify options 结构口径~~ 等此前各项均已落地清零。
+- **Class B（产品决策，不阻塞 §6 出场线）**：**已全部清零**——最新一项「Everything 音乐全盘发现 vs 零索引语义」2026-07-06 拍板**方案 A（发现结果按 roots 过滤）**并当场落地（ROADMAP BETA-49）；此前 clarify options 等各项均已落地。
 
 ## 会话日志
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
+
+### 2026-07-06 V — Claude Code (Fable 5) — BETA-48 修复 + BETA-49 音乐发现按 roots 过滤
+
+**承接**：BETA-47 收工后用户指示继续处理两条顺带发现 → BETA-48 直接修、发现语义经 AskUserQuestion 拍板方案 A 后当场落地。
+**关键决策**：音乐全盘发现改**按生效 roots 过滤入库**（发现器纯做加速、越界不入库；空 roots 连 es.exe 都不 spawn）——BETA-46 零索引语义对齐，BETA-01A「全盘入库」废弃；旧库越界记录不主动清（沿用「生效目录之外」提示 + purge 口径）。
+**产出**：local-index 三处发现分支统一过滤 + `filter_discovered_to_roots` 纯函数；BETA-48 `embedding_model_path` 前端透传 + 语义 tab 路径覆盖 UI；文案「全盘发现」→「快速发现（仅限所选目录）」。
+**结果**：local-index 26（+2，含改写的行为变更测试）/ desktop 全量 exit 0；clippy（清 2 条 doc 缩进）/fmt/tsc/vite 净。
+**未尽事宜**：音乐发现不越界随 BETA-47 真机一并验证。
 
 ### 2026-07-06 IV — Claude Code (Fable 5) — BETA-47 选项页重构（七 tab + Everything 开关 + 拆文件）
 

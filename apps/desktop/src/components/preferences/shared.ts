@@ -72,7 +72,7 @@ export interface IndexStatus {
 export function phaseChipLabel(phase: IndexPhase): string {
   switch (phase) {
     case "music_discovery":
-      return "🎵 扫描音乐（Everything 全盘发现，请稍候）";
+      return "🎵 扫描音乐（Everything 快速发现，请稍候）";
     case "music_scan":
       return "🎵 扫描音乐目录";
     case "doc":

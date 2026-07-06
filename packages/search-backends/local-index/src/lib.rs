@@ -38,6 +38,44 @@ pub enum LocalPreview {
     Document(DocumentPreview),
 }
 
+/// 2026-07-06 拍板（BETA-46 零索引语义对齐）：全盘发现的路径归一化 key。
+/// Windows 分隔符统一 `\` + 全小写（路径大小写不敏感）、Unix 统一 `/` 保留大小写；
+/// 尾部分隔符去除（纯做前缀比较、无需保留 `C:\` 展示形态）。
+fn discovery_path_key(path: &Path) -> String {
+    let s = path.to_string_lossy();
+    #[cfg(windows)]
+    {
+        s.replace('/', "\\").trim_end_matches('\\').to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        s.replace('\\', "/").trim_end_matches('/').to_string()
+    }
+}
+
+/// 2026-07-06 拍板：全盘发现结果**按生效音乐 roots 过滤**后再入库——发现器（Windows
+/// Everything / macOS Spotlight）只做加速，不再把 roots 之外的全盘音频带进索引
+/// （BETA-46「默认零索引、未经同意不索引」语义对齐；BETA-01A 原「全盘入库」行为
+/// 诞生于系统三夹默认索引时代、已废弃）。想收录某处散落音乐 = 把该目录加进索引目录。
+/// 判界按「等于 root 或 root + 分隔符前缀」，防 `D:\Music2` 误挂 `D:\Music`。
+fn filter_discovered_to_roots(paths: Vec<PathBuf>, roots: &[PathBuf]) -> Vec<PathBuf> {
+    const SEP: char = if cfg!(windows) { '\\' } else { '/' };
+    let root_keys: Vec<String> = roots
+        .iter()
+        .map(|r| discovery_path_key(r))
+        .filter(|k| !k.is_empty())
+        .collect();
+    paths
+        .into_iter()
+        .filter(|p| {
+            let k = discovery_path_key(p);
+            root_keys
+                .iter()
+                .any(|r| k.starts_with(r.as_str()) && k[r.len()..].starts_with(SEP))
+        })
+        .collect()
+}
+
 /// 本地索引搜索后端。持 db 路径（音乐 + 文档表共用一个 sqlite 文件）。
 #[derive(Debug, Clone)]
 pub struct LocalIndexBackend {
@@ -52,7 +90,8 @@ impl LocalIndexBackend {
         }
     }
 
-    /// 手动索引：音乐**全盘发现**（BETA-01A）+ 文档目录扫描 + 图片 OCR（BETA-03），写入索引。
+    /// 手动索引：音乐发现（BETA-01A 全盘枚举、**2026-07-06 起按 `music_roots` 过滤入库**）、
+    /// 文档目录扫描与图片 OCR（BETA-03），写入索引。
     /// 返回 `(音乐统计, 文档统计, 图片统计)`。会创建 db 父目录。
     /// OCR 引擎不可用（无 OCR 语言包 / 无 tesseract）→ 图片轮跳过、统计为零、不报错。
     pub fn reindex(
@@ -175,9 +214,12 @@ impl LocalIndexBackend {
         }
         let music = MusicIndex::open(&self.db_path).map_err(to_search_err)?;
         // phase 通知同 progress 版本（Everything 全盘发现分支无 per_file 进度、仅 phase chip 兜底）。
-        let music_stats = if let Some(disc) = discovery {
+        // 2026-07-06 拍板：roots 为空直接跳过发现器（零索引 = 连 es.exe 都不 spawn）；
+        // 发现结果按 roots 过滤后入库（`filter_discovered_to_roots`）。
+        let music_stats = if let Some(disc) = discovery.filter(|_| !roots.is_empty()) {
             progress.on_phase(locifind_indexer::IndexPhase::MusicDiscovery);
             if let Ok(paths) = disc.discover_audio() {
+                let paths = filter_discovered_to_roots(paths, roots);
                 let stats = music.index_paths(&paths).map_err(to_search_err)?;
                 music.prune_deleted().map_err(to_search_err)?;
                 stats
@@ -232,9 +274,11 @@ impl LocalIndexBackend {
         // BETA-33 cycle 7-a：每 phase 开始前调 `on_phase`，让 UI 显示 chip「🎵 扫描音乐 …」等。
         // 全盘发现成功 → MusicDiscovery（无 per-file 进度、Everything 秒级、UI 显示"请稍候"文案）；
         // 发现失败 fallback → MusicScan（走 walkdir 有进度）；无发现器同 MusicScan。
-        let music_stats = if let Some(disc) = discovery {
+        // 2026-07-06 拍板：roots 空跳过发现器、发现结果按 roots 过滤（同 filter 版 inner）。
+        let music_stats = if let Some(disc) = discovery.filter(|_| !roots.is_empty()) {
             progress.on_phase(locifind_indexer::IndexPhase::MusicDiscovery);
             if let Ok(paths) = disc.discover_audio() {
+                let paths = filter_discovered_to_roots(paths, roots);
                 let stats = music.index_paths(&paths).map_err(to_search_err)?;
                 music.prune_deleted().map_err(to_search_err)?;
                 stats
@@ -267,7 +311,8 @@ impl LocalIndexBackend {
     }
 
     /// [`reindex`](Self::reindex) 的可注入版本（测试用 mock 发现器 / OCR 引擎）。
-    /// 音乐：发现器可用且枚举成功 → `index_paths`（全盘）；否则回退 `index_dirs(music_roots)`。
+    /// 音乐：发现器可用且枚举成功 → 结果按 `music_roots` 过滤后 `index_paths`
+    /// （roots 空则不调发现器）；否则回退 `index_dirs(music_roots)`。
     /// 文档：始终 `index_dirs(doc_roots)`。图片：`ocr` 为 Some 时 `index_image_dirs`，否则跳过。
     pub(crate) fn reindex_with(
         &self,
@@ -282,10 +327,13 @@ impl LocalIndexBackend {
             std::fs::create_dir_all(parent)?;
         }
         let music = MusicIndex::open(&self.db_path).map_err(to_search_err)?;
-        let music_stats = match discovery {
+        // 2026-07-06 拍板：music_roots 空跳过发现器（零索引不 spawn es.exe）、
+        // 发现结果按 roots 过滤后入库。
+        let music_stats = match discovery.filter(|_| !music_roots.is_empty()) {
             // 全盘发现成功 → 索引发现到的路径 + 回收已删（index_paths 不自带回收，BETA-07）。
             Some(disc) => match disc.discover_audio() {
                 Ok(paths) => {
+                    let paths = filter_discovered_to_roots(paths, music_roots);
                     let stats = music.index_paths(&paths).map_err(to_search_err)?;
                     music.prune_deleted().map_err(to_search_err)?;
                     stats
@@ -295,7 +343,7 @@ impl LocalIndexBackend {
                     .index_dirs_excluding(music_roots, exclude)
                     .map_err(to_search_err)?,
             },
-            // 无发现器（不支持平台）→ 回退目录扫描。
+            // 无发现器（不支持平台）/ roots 空 → 回退目录扫描。
             None => music
                 .index_dirs_excluding(music_roots, exclude)
                 .map_err(to_search_err)?,
@@ -1230,11 +1278,48 @@ mod tests {
         }
     }
 
+    /// 2026-07-06 拍板改语义：发现结果按 music_roots 过滤——roots 内的路径入 `index_paths`、
+    /// roots 外的丢弃（原「空 roots 也全盘入库」行为废弃，BETA-46 零索引语义对齐）。
     #[test]
-    fn reindex_uses_discovery_paths_when_available() {
+    fn reindex_uses_discovery_paths_filtered_to_roots() {
         let dir = tempfile::tempdir().unwrap();
         let backend = LocalIndexBackend::new(dir.path().join("index.db"));
-        let disc = MockDiscovery(Ok(vec![PathBuf::from("/no/such/song.wav")]));
+        let disc = MockDiscovery(Ok(vec![
+            PathBuf::from("/no/such/song.wav"),
+            PathBuf::from("/elsewhere/other.wav"),
+        ]));
+        let roots = vec![PathBuf::from("/no/such")];
+        let (music, _doc, _img) = backend
+            .reindex_with(
+                Some(&disc),
+                None,
+                &roots,
+                &[],
+                &[],
+                &locifind_indexer::GlobSet::empty(),
+            )
+            .unwrap();
+        assert_eq!(music.scanned, 1, "仅 roots 内的发现路径进 index_paths");
+        assert_eq!(music.failed, 1, "不存在的路径计 failed");
+    }
+
+    /// 记调用次数的发现器：验证「roots 空 → 发现器压根不被调用（不 spawn es.exe）」。
+    #[derive(Debug, Default)]
+    struct CountingDiscovery(std::sync::atomic::AtomicU64);
+    impl locifind_indexer::AudioDiscovery for CountingDiscovery {
+        fn discover_audio(&self) -> Result<Vec<PathBuf>, locifind_indexer::DiscoveryError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(vec![PathBuf::from("/anywhere/x.wav")])
+        }
+    }
+
+    /// 2026-07-06 拍板：music_roots 为空时跳过发现器——默认零索引连 es.exe 都不 spawn
+    /// （顺带消除单测在装了 Everything 的机器上真跑 es.exe 的噪声与耗时）。
+    #[test]
+    fn reindex_skips_discovery_when_music_roots_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = LocalIndexBackend::new(dir.path().join("index.db"));
+        let disc = CountingDiscovery::default();
         let (music, _doc, _img) = backend
             .reindex_with(
                 Some(&disc),
@@ -1245,8 +1330,43 @@ mod tests {
                 &locifind_indexer::GlobSet::empty(),
             )
             .unwrap();
-        assert_eq!(music.scanned, 1, "应走 index_paths 处理发现到的路径");
-        assert_eq!(music.failed, 1, "不存在的路径计 failed");
+        assert_eq!(
+            disc.0.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "roots 空不应调用发现器"
+        );
+        assert_eq!(music.scanned, 0);
+    }
+
+    /// `filter_discovered_to_roots` 纯函数：前缀判界（`Music2` 不挂 `Music`）+
+    /// 平台归一化（Windows 大小写/分隔符不敏感；Unix 大小写敏感）。
+    #[test]
+    fn filter_discovered_to_roots_boundaries() {
+        #[cfg(windows)]
+        {
+            let roots = vec![PathBuf::from("D:\\Music")];
+            let paths = vec![
+                PathBuf::from("d:\\music\\a.mp3"),    // 大小写不同 → 命中
+                PathBuf::from("D:/Music/sub/b.flac"), // 正斜杠 → 命中
+                PathBuf::from("D:\\Music2\\c.mp3"),   // 兄弟目录前缀 → 不命中
+                PathBuf::from("E:\\Other\\d.mp3"),    // roots 外 → 不命中
+            ];
+            let kept = filter_discovered_to_roots(paths, &roots);
+            assert_eq!(kept.len(), 2, "命中 a.mp3 + b.flac，实得 {kept:?}");
+        }
+        #[cfg(not(windows))]
+        {
+            let roots = vec![PathBuf::from("/home/u/Music")];
+            let paths = vec![
+                PathBuf::from("/home/u/Music/a.mp3"),  // 命中
+                PathBuf::from("/home/u/music/b.mp3"),  // Unix 大小写敏感 → 不命中
+                PathBuf::from("/home/u/Music2/c.mp3"), // 兄弟目录前缀 → 不命中
+            ];
+            let kept = filter_discovered_to_roots(paths, &roots);
+            assert_eq!(kept.len(), 1, "仅 a.mp3 命中，实得 {kept:?}");
+        }
+        // 空 roots → 全丢（调用方本就应先短路、此处兜底语义一致）。
+        assert!(filter_discovered_to_roots(vec![PathBuf::from("/x/a.mp3")], &[]).is_empty());
     }
 
     #[test]

@@ -94,8 +94,8 @@ export function EverythingPane({
         <p className="prefs-hint">
           开启时 LociFind 在三处调用 Everything（es.exe）：① 按文件名搜索加速与
           Windows 索引盲区兜底（如 <code>%TEMP%</code>、外接盘）；② 建索引时的音乐
-          全盘发现；③ 模型下载前的本机已有模型发现。未安装 Everything 时自动降级、
-          不影响使用。
+          快速发现（结果仅限所选索引目录）；③ 模型下载前的本机已有模型发现。
+          未安装 Everything 时自动降级、不影响使用。
         </p>
         <p className="prefs-hint">
           关闭后 LociFind 完全不调用 es.exe：搜索加速部分<strong>需重启应用生效</strong>，
