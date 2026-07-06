@@ -136,9 +136,14 @@ export function useModelDownload(kind: ModelKind = 'embedding'): UseModelDownloa
       await invoke(w.invokeStart);
       // 成功路径靠 event setStatus('done')
     } catch (e) {
+      const msg = typeof e === 'string' ? e : JSON.stringify(e);
+      // v0.9.16 真机踩坑：用户点「取消」后 invoke promise 以 Err("用户取消下载")
+      // 拒绝——事件路径已过滤该 reason，但这里的 catch 没过滤，会把 cancel() 刚设的
+      // idle 覆盖成「下载失败：用户取消下载」。主动取消不是失败，静默保持 idle。
+      if (msg === '用户取消下载') return;
       // backend 已 emit error event、setStatus 也会 setError；这里兜底（防 event 丢失）
       setStatus('error');
-      setError(typeof e === 'string' ? e : JSON.stringify(e));
+      setError(msg);
     }
   }, [kind]);
 
