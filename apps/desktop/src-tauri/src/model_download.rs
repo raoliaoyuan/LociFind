@@ -370,6 +370,29 @@ fn parse_kind(kind: &str) -> Result<ModelKind, String> {
     }
 }
 
+// everything crate 是 Windows target-gated 依赖（Cargo.toml
+// `[target.'cfg(target_os = "windows")'.dependencies]`）——非 Windows 平台经此对
+// shim 降级（不可用 / 零候选），macOS DMG CI 才能编（v0.9.16 首跑实锤踩坑）。
+#[cfg(target_os = "windows")]
+fn es_cli_available() -> bool {
+    locifind_search_backend_everything::es_cli_available()
+}
+
+#[cfg(not(target_os = "windows"))]
+const fn es_cli_available() -> bool {
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn es_find_files_named(name: &str, limit: usize) -> Vec<PathBuf> {
+    locifind_search_backend_everything::find_files_named(name, limit)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn es_find_files_named(_name: &str, _limit: usize) -> Vec<PathBuf> {
+    Vec::new()
+}
+
 #[derive(Clone, Serialize)]
 pub struct LocalModelCandidate {
     pub path: String,
@@ -404,12 +427,12 @@ pub fn discover_local_model(kind: String) -> Result<DiscoverResult, String> {
         });
     }
 
-    let everything_available = locifind_search_backend_everything::es_cli_available();
+    let everything_available = es_cli_available();
     let mut candidates: Vec<LocalModelCandidate> = Vec::new();
     if everything_available {
         let target_key = target.to_string_lossy().to_lowercase();
         for name in kind.acceptable_source_names() {
-            for p in locifind_search_backend_everything::find_files_named(name, 10) {
+            for p in es_find_files_named(name, 10) {
                 let key = p.to_string_lossy().to_lowercase();
                 // 排除默认路径自身（不完整文件）与重复项。
                 if key == target_key || candidates.iter().any(|c| c.path.to_lowercase() == key) {
