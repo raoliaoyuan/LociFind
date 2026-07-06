@@ -8,18 +8,18 @@
 
 - **阶段**：B（Beta）进行中；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**BETA-47/48/49 done（代码层）**——选项页七 tab + `enable_everything` 三处 es.exe 门控 + 拆文件（47）；`embedding_model_path` 前端透传修复（48）；**音乐发现按 roots 过滤**（49，方案 A 拍板落地：越界不入库、空 roots 不 spawn es.exe）。待随下次发版真机验证。
+- **当前 task**：**BETA-47/48/49/50 done（代码层）**——选项页七 tab + `enable_everything` 三处 es.exe 门控（47）；`embedding_model_path` 透传（48）；音乐发现按 roots 过滤（49）；**OCR 数字校正变体**（50，真机准考证 5→S 误识沉淀：原文保留 + 校正变体追加可搜）。待随下次发版真机验证。
 - **下一步 top-3**：① v0.9.17 + BETA-47/49 真机验证（用户进行中：下载取消/镜像兜底/三行布局/卸载保模型/零索引空态/Everything tab 两态/音乐发现不越界/升级零损失）；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ 双平台真机复跑填 [beta-exit.md](docs/reviews/beta-exit.md) TODO 格。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（音乐全盘发现语义 2026-07-06 方案 A〔按 roots 过滤〕拍板并落地）。
 
 ## 当前 Task
 
-**2026-07-06 V（最新）**：**BETA-48 修复 + BETA-49 音乐发现按 roots 过滤（拍板落地）**。① 用户拍板**方案 A**：全盘发现结果按生效音乐 roots 过滤后入库——local-index 三处发现分支统一（`filter_discovered_to_roots` 纯函数：Windows 大小写/分隔符归一 + root+分隔符判界防 `Music2` 误挂 `Music`）+ **空 roots 直接跳过发现器**（零索引不 spawn es.exe；顺带消除单测/文档-only 重建路径的全盘枚举噪声）；旧库越界记录沿用既有「生效目录之外」提示 + purge 清理口径、不主动删。行为变更测试面：改写发现入库测试 + 计数 mock（空 roots 零调用）+ 纯函数边界测试。② BETA-48：前端 AppSettings 补 `embedding_model_path` 透传（修 UI 保存冲掉手工值）+ 语义召回 tab 暴露「语义模型路径覆盖」。③ UI 文案同步（「全盘发现」→「快速发现（仅限所选目录）」）。local-index **26**（+2）/ desktop 全量 exit 0 + clippy/fmt/tsc/vite 净。**待真机**：音乐发现不越界 + Everything tab 两态（随 BETA-47 一并验）。
+**2026-07-06 VI（最新）**：**BETA-50 OCR 数字校正（真机踩坑同轮沉淀）**。用户反馈「搜 150138 找不到准考证 PNG」→ 实机诊断 index.db 实锤根因 = Windows OCR **5→S 误识 + 空格拆组**（`15013866763` → `1 S013866763`；图已入库、trigram 子串匹配本身正常，命中的两条全是文件名命中）。索引端修法：indexer 新增 `digit_correction_variants`（易错字母 S/O/I·l/B/Z → 数字 + 跨单空格分组合并；保守规则宁漏勿误：真数字 ≥4 且易错 ≤2、纯数字分组 ≥2 且 ≥6 位、链长/条数有上限）+ `finalize_ocr_text` 统一收口（**原文一字不改**、变体以〔OCR数字校正〕行追加正文尾部，正确号码与误识形态均可 trigram 命中）；两 OCR 引擎（WinRT/Tesseract）+ 扫描 PDF 逐页管线自动共享。indexer 182（+5：真机 case 四连 / 保守反例 / doc_db FTS e2e）全过、依赖面 local-index/desktop/server 零回归、clippy/fmt 净。**生效条件**：随下次发版；存量图片 mtime skip 需清空索引重建；locifindd 下次构建须重编（indexer 变更）。
 
 ## 下一步
 
 1. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
-2. **BETA-33 cycle 9 真机验证**：随下次发版装机，按 [manual-test-scenarios](docs/manual-test-scenarios.md) 跑六场景；本轮验证面另含 BETA-43（出处/`read_document`/审计导出，[playbooks README](docs/playbooks/README.md) 第 8/9 条）+ **BETA-12 卸载清理**（场景 5「升级零数据损失」为发版阻断；NSIS hook 首次真实构建即本次发版 CI）+ **BETA-29 意图草稿 v1（6 场景）+ v2（7 场景）**+ **BETA-47 选项页**（七 tab / Everything 检测两态 / 开关关闭后音乐发现回退 + 重启后 Everything 臂消失）+ **BETA-49 音乐发现不越界**（仅生效目录内音频入库）。
+2. **BETA-33 cycle 9 真机验证**：随下次发版装机，按 [manual-test-scenarios](docs/manual-test-scenarios.md) 跑六场景；本轮验证面另含 BETA-43（出处/`read_document`/审计导出，[playbooks README](docs/playbooks/README.md) 第 8/9 条）+ **BETA-12 卸载清理**（场景 5「升级零数据损失」为发版阻断；NSIS hook 首次真实构建即本次发版 CI）+ **BETA-29 意图草稿 v1（6 场景）+ v2（7 场景）**+ **BETA-47 选项页**（七 tab / Everything 检测两态 / 开关关闭后音乐发现回退 + 重启后 Everything 臂消失）+ **BETA-49 音乐发现不越界**（仅生效目录内音频入库）+ **BETA-50 OCR 数字校正**（新版装机后清空索引重建、搜 `150138` 应命中准考证 PNG）。
 3. **v0.9.15 发版 done（并发首版）**：windows+macos 双 workflow 同 tag 并发均 success，[Release](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.15) 含 exe + DMG（aarch64）+ changelog；macOS DMG CI 首验通过。用户真机测试进行中；**BETA-45/46 改动未随包**、待下次发版验证。
 4. **BETA-10 剩余**：macOS DMG 产物 CI done 且 **v0.9.15 首验通过**；剩 macOS 真机放行验证（§6.3）；winget 待 BETA-14 后 / Homebrew tap 可启动（DMG CI 已跑通）。
 5. **BETA-40 真实内网证据**：唯一剩余验收项，依赖 ①。
@@ -37,6 +37,13 @@
 ## 会话日志
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
+
+### 2026-07-06 VI — Claude Code (Fable 5) — BETA-50 OCR 数字校正（真机准考证误识诊断 + 沉淀）
+
+**承接**：用户问「为什么搜 150138 找不到准考证 PNG 内容」→ 实机诊断 index.db：图已入库、trigram 子串匹配正常，根因 = Windows OCR 把 5 识成 S（`15013866763` → `1 S013866763`）+ 空格拆组 → 用户拍板「现在就做」索引端校正。
+**产出**：indexer `digit_correction_variants`（易错字母 S/O/I·l/B/Z → 数字 + 跨单空格分组合并；保守规则：真数字 ≥4 且易错 ≤2、纯数字分组 ≥2 且 ≥6 位）+ `finalize_ocr_text` 收口（**原文保留**、变体以〔OCR数字校正〕行追加，trigram 子串两态可搜）；两 OCR 引擎 + 扫描 PDF 逐页管线共享。
+**结果**：indexer 182（+5：真机 case 四连 / 保守反例 / doc_db FTS e2e）、local-index 26、desktop + server 全量 exit 0；clippy/fmt 净。
+**未尽事宜**：随下次发版生效；存量图片 mtime skip、需清空索引重建才带变体；locifindd 下次构建须重编（indexer 变更）。
 
 ### 2026-07-06 V — Claude Code (Fable 5) — BETA-48 修复 + BETA-49 音乐发现按 roots 过滤
 
@@ -68,10 +75,3 @@
 **产出**：**BETA-45** 模型本地发现 + 卸载默认保模型（NSIS `/SD IDNO` + 同卷 Rename 暂存；everything `find_files_named`〔wfn: 精确名 + UTF-8 导出〕；discover/import 命令 + 白名单 + 原子落盘 + 复用下载 done event；ModelDownloadStep 发现 UI）；**BETA-46** 默认零索引（`resolve_index_roots_tagged` 三夹仅勾选纳入、空+false=零索引）+ checkbox 常显 + banner 退役 + 路径完整显示；**BETA-47** 选项页重构登记（ROADMAP 新 B8 小节）。
 **结果**：desktop 168 / everything 15 / settings 四分支 / uninstall 闸门（+2 断言）全绿；tsc/vite/clippy `-D warnings`/fmt 净。根因诊断：反馈① = BETA-12 整目录删含模型；反馈② = 空 roots 兜底三夹旧语义。
 **未尽事宜**：BETA-45/46 随下次发版真机验证（NSIS 弹窗须真装真卸）；升级行为变化（空 roots 老装机停索三夹）随 cycle 9 复测确认；BETA-47 下会话。详录 → [session-details-2026-07.md](docs/session-logs/session-details-2026-07.md)。
-
-### 2026-07-06 — Claude Code (Opus 4.8 / Fable 5) — BETA-14 出场报告骨架 + clarify options 方案 A + 老账收割至 99.4%
-
-**承接**：用户问「本次会话该做什么」→ 读三份共享文档 + 定向读 ROADMAP §2/§6.3/§8 → 判定质量线已达标、卡口全在真机/对外；用户选「先看 ROADMAP 全局再定」→ 按建议做出场报告骨架 + clarify 分析 → 拍板方案 A → 就地实现 → 续推老账收割。
-**产出**：① [beta-exit.md](docs/reviews/beta-exit.md) 骨架（§9 模板，parser-only 全填、真机格标 TODO，B→V checklist 必交付项）；② clarify options **方案 A** 拍板并落地（[决策备忘](docs/reviews/beta-14-clarify-options-decision-2026-07-06.md)）——按 reason 定带不带 options、非 Unknown 一律挂、parser（`clarify_with`+`standard_options`）与标注（d6/d8 共 17 条）双向对齐，Class B 清零；③ 老账收割 9 条（songs by 小写连字符 artist ×4 / 碳中和 compound 占位符保全 / 裸 no+字面扩展名窄路径 / music 目录 mixed hint / 几个G→size_desc / d3 ft 对齐 ×2）。
-**结果**：**v0.9 977/23/0→994/6/0（99.4%）、v0.5 490/10/0→495/5/0**，逐 case 零回归；intent-parser 230→235 测 + evals/harness/server 全 gate（28 suite 0 failed）+ clippy `-D warnings`/fmt 净。剩 6 partial 全为 v0.5 标注锁定项 + 备份文件两难，parser 收割见底。
-**未尽事宜**：真机复跑填 beta-exit TODO 格；clarify en query 返中文 options 是既有 i18n 缺口（独立小卡）。详录 → [session-details-2026-07.md](docs/session-logs/session-details-2026-07.md)。

@@ -21,7 +21,8 @@ const OCR_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// 单图 OCR 引擎。跨平台 + 跨实现（Windows WinRT / Tesseract / 后续 macOS Vision）。
 pub trait OcrEngine: Send + Sync + std::fmt::Debug {
-    /// 识别单张图片的全部文字（已做 CJK 空格折叠）。
+    /// 识别单张图片的全部文字（已做 CJK 空格折叠 + 数字校正变体追加，
+    /// 见 [`finalize_ocr_text`]）。
     ///
     /// 失败（解码错 / 引擎错 / 超时 / 进程缺失）返回 [`IndexError::Tag`]，由增量循环计
     /// failed、跳过、不中断整轮。
@@ -80,6 +81,100 @@ fn is_cjk(c: char) -> bool {
         | 0x4E00..=0x9FFF // 统一表意
         | 0xF900..=0xFAFF // 兼容表意
     )
+}
+
+/// OCR 数字上下文里的易错字母 → 对应数字（2026-07-06 真机实锤：准考证 PNG 手机号
+/// `15013866763` 被 Windows OCR 识成 `1 S013866763`、`123456` 识成 `1234S6`）。
+/// 只收经典五对，扩展前先确认误杀风险。
+const fn confusable_digit(c: char) -> Option<char> {
+    match c {
+        'S' | 's' => Some('5'),
+        'O' | 'o' => Some('0'),
+        'I' | 'l' => Some('1'),
+        'B' => Some('8'),
+        'Z' | 'z' => Some('2'),
+        _ => None,
+    }
+}
+
+/// 数字或数字易错字母（数字链扫描的成员判定）。
+fn is_digitish(c: char) -> bool {
+    c.is_ascii_digit() || confusable_digit(c).is_some()
+}
+
+/// 从 OCR 文本提取「数字校正变体」：对疑似数字串做易错字母→数字校正 + 单空格分组合并，
+/// 返回与原文不同的候选串（去重、上限 16 条）。**不改原文**——变体由
+/// [`finalize_ocr_text`] 追加到正文尾部，原样与校正样都可被 trigram FTS 子串命中。
+///
+/// 数字链 = 连续 digitish run 序列、run 间恰一个 ASCII 空格（OCR 常把一个号码拆成
+/// `1 S013866763`，也有 `789 803 810` 这类原本就分组展示的号码）。产出规则（保守，
+/// 宁漏勿误）：
+/// - 含易错字母：真数字 ≥ 4 且易错字母 ≤ 2（少数派）→ 校正 + 合并；
+/// - 纯数字多组：组数 ≥ 2 且总数字 ≥ 6 → 仅合并（`789 803 810` → `789803810`）；
+/// - 合并后 > 64 字符的病态链不产出。
+#[must_use]
+pub fn digit_correction_variants(text: &str) -> Vec<String> {
+    let mut variants: Vec<String> = Vec::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if !is_digitish(chars[i]) {
+            i += 1;
+            continue;
+        }
+        // 数字链起点：吃 run、跨单空格续链。
+        let mut raw = String::new();
+        let mut corrected = String::new();
+        let mut digits = 0usize;
+        let mut conf = 0usize;
+        let mut groups = 1usize;
+        let mut j = i;
+        loop {
+            while j < chars.len() && is_digitish(chars[j]) {
+                let c = chars[j];
+                raw.push(c);
+                if let Some(d) = confusable_digit(c) {
+                    corrected.push(d);
+                    conf += 1;
+                } else {
+                    corrected.push(c);
+                    digits += 1;
+                }
+                j += 1;
+            }
+            if j + 1 < chars.len() && chars[j] == ' ' && is_digitish(chars[j + 1]) {
+                raw.push(' ');
+                groups += 1;
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        let emit = corrected.chars().count() <= 64
+            && (((1..=2).contains(&conf) && digits >= 4)
+                || (conf == 0 && groups >= 2 && digits >= 6));
+        if emit && corrected != raw && !variants.contains(&corrected) {
+            variants.push(corrected);
+        }
+        i = j.max(i + 1);
+    }
+    variants.truncate(16);
+    variants
+}
+
+/// OCR 引擎输出的统一收尾：[`normalize_ocr_text`] 归一化 + 数字校正变体追加。
+/// 变体以「〔OCR数字校正〕」标记行附在正文尾部——预览可见（顺带解释"为什么命中"）、
+/// trigram FTS 可搜（用户按正确号码搜、命中被 OCR 误识的图/扫描页）。
+/// 两个引擎（Windows.Media.Ocr / Tesseract）与扫描版 PDF 逐页管线共用此收口。
+#[must_use]
+pub fn finalize_ocr_text(raw: &str) -> String {
+    let normalized = normalize_ocr_text(raw);
+    let variants = digit_correction_variants(&normalized);
+    if variants.is_empty() {
+        normalized
+    } else {
+        format!("{normalized}\n〔OCR数字校正〕{}", variants.join(" "))
+    }
 }
 
 /// spawn 外部 OCR 进程、超时 kill、成功返回 stdout（按 UTF-8 lossy 解码）。
@@ -257,7 +352,7 @@ impl OcrEngine for WindowsOcrEngine {
         .arg(&self.encoded_command)
         .env("LOCIFIND_OCR_IMAGE", native_path);
         let raw = spawn_capture_stdout(cmd, image)?;
-        Ok(normalize_ocr_text(&raw))
+        Ok(finalize_ocr_text(&raw))
     }
 
     fn name(&self) -> &'static str {
@@ -339,7 +434,7 @@ impl OcrEngine for TesseractOcrEngine {
         let mut cmd = Command::new("tesseract");
         cmd.arg(image).arg("stdout").arg("-l").arg(&self.langs);
         let raw = spawn_capture_stdout(cmd, image)?;
-        Ok(normalize_ocr_text(&raw))
+        Ok(finalize_ocr_text(&raw))
     }
 
     fn name(&self) -> &'static str {
@@ -383,6 +478,71 @@ mod tests {
     fn normalize_digit_between_cjk_keeps_separation() {
         // 数字非 CJK：`年 2024 月` 两侧空格应保留（不与数字粘连）。
         assert_eq!(normalize_ocr_text("年 2024 月"), "年 2024 月");
+    }
+
+    /// 2026-07-06 真机实锤 case：准考证 PNG 里 Windows OCR 把 5 识成 S、号码被空格
+    /// 拆组——校正变体必须还原出用户会搜的真号码。
+    #[test]
+    fn digit_variants_real_world_exam_ticket() {
+        // 手机号 `15013866763` 被识成 `1 S013866763`（前导 1 被拆 + 5→S）。
+        assert_eq!(
+            digit_correction_variants("会员手机 1 S013866763"),
+            vec!["15013866763".to_string()]
+        );
+        // 密码 `1234S6`（5→S，单组）。
+        assert_eq!(
+            digit_correction_variants("密码 1234S6"),
+            vec!["123456".to_string()]
+        );
+        // 会议号 `789 803 810`：纯数字分组展示 → 仅合并。
+        assert_eq!(
+            digit_correction_variants("会议号 789 803 810"),
+            vec!["789803810".to_string()]
+        );
+        // 身份证号紧邻误识号码（单空格连成一条链）：整链校正合并，子串仍可 trigram 命中。
+        assert_eq!(
+            digit_correction_variants("440307201312314812 1 S013866763"),
+            vec!["44030720131231481215013866763".to_string()]
+        );
+    }
+
+    /// 保守规则的反例：不该产出变体的输入。
+    #[test]
+    fn digit_variants_conservative_negatives() {
+        // 纯字母词（l/o 是易错字符但无真数字）。
+        assert!(digit_correction_variants("Hello World Solo").is_empty());
+        // 真数字不足 4 个。
+        assert!(digit_correction_variants("S13 B2").is_empty());
+        // 易错字母过多（> 2，更像真字母串 / 序列号）。
+        assert!(digit_correction_variants("SOS 1234 SOB").is_empty());
+        // 单组纯数字（无需校正也无需合并）。
+        assert!(digit_correction_variants("电话 15013866763").is_empty());
+        // 空串。
+        assert!(digit_correction_variants("").is_empty());
+    }
+
+    /// finalize：无变体 → 与 normalize 等价；有变体 → 追加标记行、原文保留。
+    #[test]
+    fn finalize_appends_variants_and_keeps_original() {
+        assert_eq!(finalize_ocr_text("会 议 纪 要"), "会议纪要");
+        let out = finalize_ocr_text("会员手机 1 S013866763");
+        assert!(out.starts_with("会员手机 1 S013866763"), "原文必须保留");
+        assert!(
+            out.ends_with("〔OCR数字校正〕15013866763"),
+            "变体行追加在尾部，实得 {out:?}"
+        );
+    }
+
+    /// 变体去重 + 上限 16 条（病态 OCR 噪声不撑爆 body）。
+    #[test]
+    fn digit_variants_dedupe_and_cap() {
+        let dup = digit_correction_variants("1234S6 和 1234S6");
+        assert_eq!(dup, vec!["123456".to_string()], "重复链只产出一条");
+        let many: String = (0..30)
+            .map(|i| format!("{i:04}S{i:02}"))
+            .collect::<Vec<_>>()
+            .join(" 号 ");
+        assert!(digit_correction_variants(&many).len() <= 16);
     }
 
     #[test]

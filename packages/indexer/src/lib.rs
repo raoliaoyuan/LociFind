@@ -39,7 +39,10 @@ pub use model::{
 };
 #[cfg(windows)]
 pub use ocr::WindowsOcrEngine;
-pub use ocr::{default_ocr_engine, normalize_ocr_text, OcrEngine, TesseractOcrEngine};
+pub use ocr::{
+    default_ocr_engine, digit_correction_variants, finalize_ocr_text, normalize_ocr_text,
+    OcrEngine, TesseractOcrEngine,
+};
 pub use pdf_rasterizer::{
     default_pdf_rasterizer, PdfRasterizer, PopplerPdfRasterizer, RasterizedPdf,
 };

@@ -1087,6 +1087,26 @@ mod tests {
         );
     }
 
+    /// 2026-07-06 真机沉淀（准考证 PNG）：OCR 把 `15013866763` 识成 `1 S013866763`、
+    /// 用户按真号码（或其 ≥3 位子串）搜零命中。经 [`crate::finalize_ocr_text`] 追加
+    /// 数字校正变体后，正确号码与其子串均可 FTS 命中，原始误识文本也仍可搜。
+    #[test]
+    fn fts_matches_ocr_digit_corrected_body() {
+        let idx = DocumentIndex::open_in_memory().unwrap();
+        let body = crate::finalize_ocr_text("会员手机 1 S013866763 会员账号 440307201312314812");
+        idx.upsert_document(&doc("/d/准考证.png", "png", "x"), &body)
+            .unwrap();
+        for q in ["15013866763", "150138", "S013866763"] {
+            let hits = idx
+                .query(&DocumentQuery {
+                    text: Some(q.to_string()),
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(hits.len(), 1, "查询 {q:?} 应命中校正后的 OCR 正文");
+        }
+    }
+
     #[test]
     fn fts_matches_title_and_author() {
         let idx = DocumentIndex::open_in_memory().unwrap();
