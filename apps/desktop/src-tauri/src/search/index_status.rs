@@ -262,14 +262,19 @@ pub(crate) fn perform_reindex_for_roots(
         Some(o) => o.into_iter().filter(|p| p.exists()).collect(),
         None => settings_roots,
     };
+    // BETA-47：Everything 集成开关 live-read——关闭时音乐轮跳过 es.exe 全盘发现、
+    // 回退目录扫描。仅 Windows 受设置控制（macOS 发现器是 Spotlight、与该开关无关）。
+    let use_audio_discovery =
+        cfg!(not(target_os = "windows")) || crate::settings::read_enable_everything(&settings_path);
     let result = {
         let backend = locifind_local_index_backend::LocalIndexBackend::new(&db_path);
         let bridge = StatusProgressBridge::new(Arc::clone(status));
-        backend.reindex_scoped_with_filter_and_progress(
+        backend.reindex_scoped_with_filter_progress_and_discovery(
             &roots,
             &filter,
             crate::settings::normalize_root_key,
             &bridge,
+            use_audio_discovery,
         )
     };
     // 成功后查**总索引数**（而非本轮 delta）供状态摘要——增量轮 delta 多为 0，显示总数才不误导。

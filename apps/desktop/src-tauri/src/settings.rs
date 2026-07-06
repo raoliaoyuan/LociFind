@@ -41,6 +41,11 @@ pub struct AppSettings {
     /// 开启后图片走更严的 0.75 质量门槛（`IMAGE_MEANINGFUL_RATIO_FLOOR`）入嵌；
     /// 关闭时 embed / purge / 段落级 explain 三处均与 BETA-33 cycle 4 一刀切现状一致。
     pub enable_image_semantics: bool,
+    /// BETA-47：Everything 集成总开关（默认开，装了就用、没装优雅降级——现状零回归）。
+    /// 关闭后三处 es.exe 调用点全部停用：① 搜索后端不注册（**需重启生效**，与 model_path
+    /// 口径一致）；② 索引期音乐全盘发现回退目录扫描（live-read）；③ 模型本地发现跳过
+    /// es.exe 扫描（live-read）。仅 Windows 有意义，其他平台忽略。
+    pub enable_everything: bool,
 }
 
 /// BETA-33 cycle 7-b：per-root 子路径排除项。
@@ -78,6 +83,7 @@ impl Default for AppSettings {
             root_excludes: Vec::new(),
             semantic_weight: None,
             enable_image_semantics: false,
+            enable_everything: true,
         }
     }
 }
@@ -244,6 +250,19 @@ pub(crate) fn read_enable_image_semantics(settings_path: &Option<std::path::Path
         .and_then(|p| fs::read_to_string(p).ok())
         .and_then(|s| serde_json::from_str::<AppSettings>(&s).ok())
         .is_some_and(|v| v.enable_image_semantics)
+}
+
+/// BETA-47：从 settings.json live-read「Everything 集成」开关（音乐全盘发现 / 模型本地
+/// 发现两处 live 调用点 + 启动期后端注册共用）。读 / 解析失败 → **true**（安全侧 =
+/// 现状「装了就用、没装优雅降级」，不因配置损坏静默关掉加速）。
+pub(crate) fn read_enable_everything(settings_path: &Option<std::path::PathBuf>) -> bool {
+    settings_path
+        .as_ref()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<AppSettings>(&s).ok())
+        // 注：不用 `is_none_or`（1.82 稳定）——crate 声明 rust-version 1.80，
+        // clippy `incompatible_msrv` 会拦。
+        .map_or(true, |v| v.enable_everything)
 }
 
 /// 设置文件路径（BETA-21 隐私面板复用，展示「配置在哪」）。
@@ -495,6 +514,29 @@ mod tests {
         assert!(read_enable_image_semantics(&Some(f.clone())));
         std::fs::write(&f, r#"{"enable_image_semantics":false}"#).unwrap();
         assert!(!read_enable_image_semantics(&Some(f)));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// BETA-47：Everything 开关默认开 + 旧 settings.json 缺字段解析为 true（零回归）+
+    /// live-read 三态（无路径 → true；显式 false / true → 读真值）。
+    #[test]
+    fn enable_everything_defaults_on_and_reads_ok() {
+        assert!(AppSettings::default().enable_everything, "默认开");
+        let json = r#"{"global_shortcut":"Ctrl+Space"}"#;
+        let s: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(s.enable_everything, "旧配置缺字段 → true（现状零回归）");
+        // live-read：无路径 → true（安全侧 = 现状）；有配置 → 读真值。
+        assert!(read_enable_everything(&None));
+        let dir = std::env::temp_dir().join(format!("locifind-everything-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("settings.json");
+        std::fs::write(&f, r#"{"enable_everything":false}"#).unwrap();
+        assert!(!read_enable_everything(&Some(f.clone())));
+        std::fs::write(&f, r#"{"enable_everything":true}"#).unwrap();
+        assert!(read_enable_everything(&Some(f.clone())));
+        // 配置损坏 → true（不因坏文件静默关加速）。
+        std::fs::write(&f, "not json").unwrap();
+        assert!(read_enable_everything(&Some(f)));
         std::fs::remove_dir_all(&dir).ok();
     }
 

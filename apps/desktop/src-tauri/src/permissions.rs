@@ -150,6 +150,23 @@ pub fn check_windows_search_indexed() -> Result<WindowsIndexStatus, String> {
     }
 }
 
+/// BETA-47：探测 Everything CLI（es.exe）是否可用（选项页「Everything」tab 检测行）。
+/// 与 `enable_everything` 设置**无关**——集成关闭时也要能告知「装没装」，
+/// 供用户决定开关。检测走 everything crate 两段式定位（PATH 裸名 → winget 已知
+/// 安装位置兜底）。everything crate 是 Windows target-gated 依赖，非 Windows 恒 false
+///（v0.9.16 macOS CI E0433 踩坑口径，同 model_download.rs shim）。
+#[tauri::command]
+pub fn check_everything_available() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        locifind_search_backend_everything::es_cli_available()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
 /// BETA-35 cycle 6：探测本机是否有可用的 `pdftoppm`（poppler-utils）——扫描版 PDF
 /// OCR 管线的页渲染依赖。**跨平台**：Windows 走 poppler-windows / winget，
 /// macOS 走 `brew install poppler`。检测语义等价于 [`locifind_indexer::PopplerPdfRasterizer::detect`]

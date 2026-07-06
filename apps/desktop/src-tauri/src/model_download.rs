@@ -460,8 +460,10 @@ pub struct DiscoverResult {
 }
 
 /// 本地模型发现（onboarding Step 3/4 挂载时调用；同步文件探测 + es.exe 短查询）。
+/// BETA-47：`enable_everything=false` 时跳过 es.exe 扫描（`everything_available=false`、
+/// 零候选），前端按「无法自动发现」提示手动放置或下载。
 #[tauri::command]
-pub fn discover_local_model(kind: String) -> Result<DiscoverResult, String> {
+pub fn discover_local_model(app: tauri::AppHandle, kind: String) -> Result<DiscoverResult, String> {
     let kind = parse_kind(&kind)?;
     let (_dir, target, _partial) = resolve_target_paths(kind);
     let expected_path = target.display().to_string();
@@ -475,7 +477,9 @@ pub fn discover_local_model(kind: String) -> Result<DiscoverResult, String> {
         });
     }
 
-    let everything_available = es_cli_available();
+    let everything_available =
+        crate::settings::read_enable_everything(&crate::settings::settings_file_path(&app))
+            && es_cli_available();
     let mut candidates: Vec<LocalModelCandidate> = Vec::new();
     if everything_available {
         let target_key = target.to_string_lossy().to_lowercase();

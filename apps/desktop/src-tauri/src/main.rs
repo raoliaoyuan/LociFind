@@ -201,25 +201,34 @@ fn build_registry(
                 warn!(backend = "windows-search", error = %err, "backend 初始化失败");
             }
         }
-        match EverythingBackend::new() {
-            Ok(backend) => {
-                let tool = SearchTool::new(
-                    "search.everything",
-                    "Everything",
-                    backend,
-                    vec![SupportedIntent::FileSearch, SupportedIntent::MediaSearch],
-                    "Everything 加速搜索（es.exe CLI）",
-                );
-                if let Err(err) = registry.register_search(tool) {
-                    eprintln!("注册 EverythingBackend 失败: {err}");
-                    warn!(backend = "everything", error = %err, "注册 backend 失败");
-                } else {
-                    info!(backend = "everything", "backend 注册成功");
+        // BETA-47：Everything 集成开关（设置默认开）。关闭时不注册后端——改动开关
+        // 需重启应用生效（与 model_path 覆盖同口径）；索引/模型发现两处 live-read 另行门控。
+        if !settings::read_enable_everything(&settings_path) {
+            info!(
+                backend = "everything",
+                "Everything 集成已在设置中关闭，跳过注册"
+            );
+        } else {
+            match EverythingBackend::new() {
+                Ok(backend) => {
+                    let tool = SearchTool::new(
+                        "search.everything",
+                        "Everything",
+                        backend,
+                        vec![SupportedIntent::FileSearch, SupportedIntent::MediaSearch],
+                        "Everything 加速搜索（es.exe CLI）",
+                    );
+                    if let Err(err) = registry.register_search(tool) {
+                        eprintln!("注册 EverythingBackend 失败: {err}");
+                        warn!(backend = "everything", error = %err, "注册 backend 失败");
+                    } else {
+                        info!(backend = "everything", "backend 注册成功");
+                    }
                 }
-            }
-            Err(err) => {
-                eprintln!("初始化 EverythingBackend 失败: {err}");
-                warn!(backend = "everything", error = %err, "backend 初始化失败");
+                Err(err) => {
+                    eprintln!("初始化 EverythingBackend 失败: {err}");
+                    warn!(backend = "everything", error = %err, "backend 初始化失败");
+                }
             }
         }
     }
@@ -658,6 +667,7 @@ fn main() {
             permissions::open_macos_fda_settings,
             permissions::check_windows_search_indexed,
             permissions::open_windows_indexing_options,
+            permissions::check_everything_available,
             permissions::check_pdftoppm_available,
             permissions::get_onboarding_state,
             permissions::complete_onboarding,

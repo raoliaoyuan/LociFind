@@ -119,8 +119,36 @@ impl LocalIndexBackend {
     where
         N: Fn(&str) -> String + Copy,
     {
+        self.reindex_scoped_with_filter_progress_and_discovery(
+            roots,
+            filter,
+            normalize_root,
+            progress,
+            true,
+        )
+    }
+
+    /// BETA-47：带「平台音频发现开关」的 filter 版 reindex。`use_audio_discovery=false`
+    /// 时跳过平台发现器（Windows Everything es.exe / macOS Spotlight mdfind），音乐一律
+    /// 走目录扫描（`MusicScan`）——桌面「关闭 Everything 集成」后索引期不再 spawn es.exe。
+    pub fn reindex_scoped_with_filter_progress_and_discovery<N>(
+        &self,
+        roots: &[PathBuf],
+        filter: &locifind_indexer::ExcludeFilter,
+        normalize_root: N,
+        progress: &dyn locifind_indexer::IndexProgress,
+        use_audio_discovery: bool,
+    ) -> Result<(IndexStats, IndexStats, IndexStats), SearchError>
+    where
+        N: Fn(&str) -> String + Copy,
+    {
+        let discovery = if use_audio_discovery {
+            locifind_indexer::default_audio_discovery()
+        } else {
+            None
+        };
         self.reindex_with_filter_and_progress_inner(
-            locifind_indexer::default_audio_discovery().as_deref(),
+            discovery.as_deref(),
             locifind_indexer::default_ocr_engine().as_deref(),
             roots,
             filter,
@@ -1257,5 +1285,45 @@ mod tests {
             )
             .unwrap();
         assert_eq!(music.scanned, 0);
+    }
+
+    /// 记录 on_phase 序列的测试 progress（BETA-47 音频发现开关断言用）。
+    #[derive(Debug, Default)]
+    struct PhaseRecorder(std::sync::Mutex<Vec<locifind_indexer::IndexPhase>>);
+    impl locifind_indexer::IndexProgress for PhaseRecorder {
+        fn on_file(&self, _: &Path, _: &str, _: bool) {}
+        fn on_batch_done(&self, _: u64, _: u64) {}
+        fn on_phase(&self, phase: locifind_indexer::IndexPhase) {
+            self.0.lock().unwrap().push(phase);
+        }
+    }
+
+    /// BETA-47：`use_audio_discovery=false` 时音乐轮**不进入**全盘发现（无 `MusicDiscovery`
+    /// phase、直接 `MusicScan`）——「关闭 Everything 集成」后索引期不 spawn es.exe 的
+    /// 可观测面。所有平台/机器确定性成立（不依赖本机是否装 Everything）。
+    #[test]
+    fn reindex_without_audio_discovery_skips_discovery_phase() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = LocalIndexBackend::new(dir.path().join("index.db"));
+        let filter = locifind_indexer::ExcludeFilter::build(&[], &[], |s: &str| s.to_string());
+        let recorder = PhaseRecorder::default();
+        backend
+            .reindex_scoped_with_filter_progress_and_discovery(
+                &[],
+                &filter,
+                |s: &str| s.to_string(),
+                &recorder,
+                false,
+            )
+            .unwrap();
+        let phases = recorder.0.lock().unwrap();
+        assert!(
+            !phases.contains(&locifind_indexer::IndexPhase::MusicDiscovery),
+            "关闭发现开关不应出现 MusicDiscovery phase，实得 {phases:?}"
+        );
+        assert!(
+            phases.contains(&locifind_indexer::IndexPhase::MusicScan),
+            "音乐轮应回退目录扫描（MusicScan），实得 {phases:?}"
+        );
     }
 }

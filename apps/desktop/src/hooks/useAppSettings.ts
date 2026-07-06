@@ -29,6 +29,9 @@ export interface AppSettings {
   include_system_defaults: boolean;
   /** BETA-39：图片 OCR 文本参与语义索引 opt-in（默认 false，防乱码 OCR 污染召回）。 */
   enable_image_semantics: boolean;
+  /** BETA-47：Everything 集成总开关（默认 true）。关闭停用搜索加速（需重启）、
+   *  索引期音乐全盘发现与模型本地发现（live 生效）三处 es.exe 调用。 */
+  enable_everything: boolean;
   exclude_globs: string[];
   /** cycle 7-b：per-root 子路径排除（相对 root 的 path glob）。 */
   root_excludes: RootExclude[];
