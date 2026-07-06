@@ -3406,7 +3406,7 @@ dependencies = [
 
 [[package]]
 name = "locifind-desktop"
-version = "0.9.15"
+version = "0.9.16"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
