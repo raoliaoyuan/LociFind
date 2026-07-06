@@ -2,6 +2,32 @@
 
 > STATUS.md 只放摘要；本文件按月留改动概览、验证输出、决策细节。最新在顶部。
 
+## 2026-07-06（续）— Claude Code (Opus 4.8) — clarify i18n 双语化 + macOS DMG CI
+
+### 承接
+上一 commit（439b120，已 push）后用户复问「本次会话该做什么」→ 我重评：纯代码可推的只剩两项，用户选「A+B 都做」。
+
+### B：clarify options/question i18n 双语化（本机完整验证）
+- **动机**：上轮方案 A 让所有非 Unknown clarify 挂了中文 options，英文/mixed query 用户看到中文 options+question（beta-exit §6 记为既有 i18n 缺口）。
+- **落地**：
+  - [clarify.rs](../../packages/intent-parser/src/parsers/clarify.rs)：新增 `pick(language, zh, en)` + `pick_opts`；`standard_options` 加 `language` 参，5 类 reason 各配中/英 options（En→英文、zh/mixed/unknown→中文）。
+  - [lib.rs](../../packages/intent-parser/src/lib.rs)：顶层 4 类高优先级 clarify（unsafe/recent-time/bulk-action/unknown-location）问题+options 就地双语构造（`bilingual_options`，因其 options 语义异于通用 `standard_options`，如 bulk 给「确认全部/只选择部分」）；`detect_vague_clarify` 5 分支问题走 `pick`。
+  - mixed 归中文（CJK 主导）；`bare_relative_time_only` 仅中文输入触发、不涉 En。
+- **eval-neutral**：evals 不校验 clarify 文案/options 内容（`is_clarify_question_equal` 恒真、`is_clarify_options_equal` 只查结构），故 v0.9 994/6/0、v0.5 495/5/0 完全不变（已验证）。
+- 单测 +3（[`tests_clarify_i18n`](../../packages/intent-parser/src/lib.rs)：en 出英文 options+ascii question / zh 保中文 / Unknown 双语均 None）。intent-parser 235→238；28 suite 全 0 failed；clippy `-D warnings`/fmt 净。
+
+### A：macOS DMG CI（本机仅 YAML 校验）
+- 新建 [release-macos.yml](../../.github/workflows/release-macos.yml)，镜像 [release-windows.yml](../../.github/workflows/release-windows.yml)：
+  - `macos-14`（Apple Silicon）+ `targets: aarch64-apple-darwin`；同款 `cargo metadata --locked` 守门 + tauri-action + `--features model-fallback,semantic-recall -- --locked`。
+  - 平台差异：Gatekeeper 放行 releaseBody（右键打开 / `xattr -dr com.apple.quarantine`，替 SmartScreen）；模型路径 `~/Library/Application Support/LociFind/models/`；Intel Mac 走源码构建（mirror daemon 抉择，避 macos-13 排队）。
+- **可编依据**：release-daemon.yml 已在 macos-14 成功编 locifindd（走 llama-cpp-4 同款 path dep），故桌面 app 带同款 features 可编。
+- **两点风险（如实登记）**：① 本机无 macOS runner，只有推 v* tag 才实跑 → **下次 macOS 发版首验**（Metal 编译/DMG 打包/tauri-action 细节可能暴露问题）；② windows+macos 两 workflow 现并行同吃 v* tag、往同一 Release 幂等追加各自安装包（tauri-action 对已存在 Release 幂等），最终 changelog 仍靠 `gh release edit` 统一覆盖。已在 workflow 注释写明。
+- YAML 解析有效、结构与 windows 对齐（7 步、同 v* 触发）。
+
+### 未尽事宜
+- A 待下次 macOS 发版真机首验；BETA-10 剩「真机放行验证」（§6.3 指标）。
+- clarify i18n 已闭合缺口；`bare_relative_time_only` 的中文 label 仅中文路径触发、无需 en 化。
+
 ## 2026-07-06 — Claude Code (Opus 4.8 / Fable 5) — 出场报告骨架 + clarify options 方案 A + 老账收割
 
 ### 承接

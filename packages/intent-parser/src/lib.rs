@@ -49,7 +49,7 @@ use locifind_search_backend::{
     SearchIntent, SizeExpression, SizeUnit, SortOrder, TargetRef, TargetSelector, TimeExpression,
 };
 
-use parsers::clarify::{clarify_unknown, clarify_with};
+use parsers::clarify::{clarify_unknown, clarify_with, pick};
 use parsers::common::{
     is_cjk, is_word_char, parse_date_with_before, parse_location_with_language,
     parse_time_expression, parse_time_fields, parse_year, word_present,
@@ -78,14 +78,26 @@ pub fn parse(input: &str) -> SearchIntent {
     let language = language::detect(trimmed);
     let lower = trimmed.to_lowercase();
 
-    // 1. 高优先级 clarify 触发（高风险 / 模糊）— 按 schema §3.5
+    // 1. 高优先级 clarify 触发（高风险 / 模糊）— 按 schema §3.5。
+    //    文案与 options 按 language 双语呈现（2026-07-06 i18n）：这 4 类 options 与
+    //    reason 的通用 standard_options 语义不同（如 bulk-action 给「确认全部/只选择部分」
+    //    而非动作枚举），故就地双语构造、不走 standard_options。
     if has_unsafe_delete_signal(&lower) {
         return SearchIntent::Clarify(Clarify {
             schema_version: SchemaVersion::V1,
             language: Some(language),
             reason: ClarifyReason::UnsafeAction,
-            question: "删除操作会移到回收站，且 MVP 暂不支持。是否改为在访达 / 资源管理器中显示，由你手动操作？".to_owned(),
-            options: Some(vec!["在访达/资源管理器中显示".into(), "取消".into()]),
+            question: pick(
+                language,
+                "删除操作会移到回收站，且 MVP 暂不支持。是否改为在访达 / 资源管理器中显示，由你手动操作？",
+                "Deletion moves items to the trash and isn't supported in the MVP. Show them in Finder / Explorer so you can act manually?",
+            )
+            .to_owned(),
+            options: Some(bilingual_options(
+                language,
+                &["在访达/资源管理器中显示", "取消"],
+                &["Show in Finder / Explorer", "Cancel"],
+            )),
         });
     }
     if is_recent_only_query(&lower) {
@@ -93,13 +105,17 @@ pub fn parse(input: &str) -> SearchIntent {
             schema_version: SchemaVersion::V1,
             language: Some(language),
             reason: ClarifyReason::AmbiguousTime,
-            question: "你说的「最近」是指最近几天？".to_owned(),
-            options: Some(vec![
-                "今天".into(),
-                "过去 3 天".into(),
-                "过去一周".into(),
-                "过去一个月".into(),
-            ]),
+            question: pick(
+                language,
+                "你说的「最近」是指最近几天？",
+                "How recent do you mean — which time range?",
+            )
+            .to_owned(),
+            options: Some(bilingual_options(
+                language,
+                &["今天", "过去 3 天", "过去一周", "过去一个月"],
+                &["Today", "Past 3 days", "Past week", "Past month"],
+            )),
         });
     }
     // 高风险批量操作 target 不明 → ambiguous_action
@@ -108,8 +124,17 @@ pub fn parse(input: &str) -> SearchIntent {
             schema_version: SchemaVersion::V1,
             language: Some(language),
             reason: ClarifyReason::AmbiguousAction,
-            question: "要对上一轮的全部结果执行此操作吗？请先确认目标文件列表。".to_owned(),
-            options: Some(vec!["确认全部".into(), "只选择部分".into(), "取消".into()]),
+            question: pick(
+                language,
+                "要对上一轮的全部结果执行此操作吗？请先确认目标文件列表。",
+                "Apply this to all of the previous results? Please confirm the target file list first.",
+            )
+            .to_owned(),
+            options: Some(bilingual_options(
+                language,
+                &["确认全部", "只选择部分", "取消"],
+                &["Confirm all", "Select some", "Cancel"],
+            )),
         });
     }
     // 位置 hint 未识别且无强约束 → ambiguous_location
@@ -118,14 +143,17 @@ pub fn parse(input: &str) -> SearchIntent {
             schema_version: SchemaVersion::V1,
             language: Some(language),
             reason: ClarifyReason::AmbiguousLocation,
-            question: "没找到对应的目录。要不要在哪个范围内搜索？".to_owned(),
-            options: Some(vec![
-                "全盘搜索".into(),
-                "下载".into(),
-                "文稿".into(),
-                "桌面".into(),
-                "取消".into(),
-            ]),
+            question: pick(
+                language,
+                "没找到对应的目录。要不要在哪个范围内搜索？",
+                "I couldn't find that folder. Which scope should I search in?",
+            )
+            .to_owned(),
+            options: Some(bilingual_options(
+                language,
+                &["全盘搜索", "下载", "文稿", "桌面", "取消"],
+                &["Whole disk", "Downloads", "Documents", "Desktop", "Cancel"],
+            )),
         });
     }
 
@@ -203,7 +231,11 @@ fn detect_vague_clarify(input: &str, lower: &str, language: Language) -> Option<
         return Some(clarify_with(
             language,
             ClarifyReason::AmbiguousAction,
-            "想对这些文件做什么操作？请说得具体一些。",
+            pick(
+                language,
+                "想对这些文件做什么操作？请说得具体一些。",
+                "What would you like to do with these files? Please be more specific.",
+            ),
         ));
     }
 
@@ -219,7 +251,11 @@ fn detect_vague_clarify(input: &str, lower: &str, language: Language) -> Option<
         return Some(clarify_with(
             language,
             ClarifyReason::AmbiguousLocation,
-            "在哪个目录里找？",
+            pick(
+                language,
+                "在哪个目录里找？",
+                "Which folder should I look in?",
+            ),
         ));
     }
 
@@ -228,7 +264,7 @@ fn detect_vague_clarify(input: &str, lower: &str, language: Language) -> Option<
         return Some(clarify_with(
             language,
             ClarifyReason::AmbiguousTime,
-            "具体是哪段时间？",
+            pick(language, "具体是哪段时间？", "Which time range exactly?"),
         ));
     }
 
@@ -245,7 +281,11 @@ fn detect_vague_clarify(input: &str, lower: &str, language: Language) -> Option<
         return Some(clarify_with(
             language,
             ClarifyReason::AmbiguousType,
-            "你要找什么类型的文件？",
+            pick(
+                language,
+                "你要找什么类型的文件？",
+                "What type of file are you looking for?",
+            ),
         ));
     }
 
@@ -262,11 +302,26 @@ fn detect_vague_clarify(input: &str, lower: &str, language: Language) -> Option<
         return Some(clarify_with(
             language,
             ClarifyReason::Unknown,
-            "想搜索什么？请描述一下。",
+            pick(
+                language,
+                "想搜索什么？请描述一下。",
+                "What would you like to search for? Please describe it.",
+            ),
         ));
     }
 
     None
+}
+
+/// 按 `language` 选中/英文 options 列表并转 `Vec<String>`（lib.rs 内 4 类高优先级
+/// clarify 就地双语构造用；detect_vague_clarify 一族经 `standard_options` 自动挂）。
+fn bilingual_options(language: Language, zh: &[&str], en: &[&str]) -> Vec<String> {
+    let src = if matches!(language, Language::En) {
+        en
+    } else {
+        zh
+    };
+    src.iter().map(|s| (*s).to_owned()).collect()
 }
 
 /// BETA-13-G12 决策 F（§3.4）：识别「孤立时间词」——剥除前导搜索动词与尾「的」后，
@@ -404,6 +459,64 @@ fn is_unknown_location_only(input: &str, lower: &str) -> bool {
         return false;
     }
     !has_any_extension_signal(lower) && !has_any_location_signal(lower)
+}
+
+#[cfg(test)]
+mod tests_clarify_i18n {
+    //! 2026-07-06 i18n：clarify options/question 按 language 双语呈现。
+    //! eval 不校验 clarify 文案/options 内容，故此改动 eval-neutral，只由本组单测守护。
+    #![allow(clippy::unwrap_used, clippy::panic)]
+    use super::*;
+
+    fn clarify_of(q: &str) -> Clarify {
+        match parse(q) {
+            SearchIntent::Clarify(c) => c,
+            other => panic!("{q} 应 clarify，实得 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn en_query_gets_english_options_and_question() {
+        // 顶层触发（unsafe delete）：英文 query → 英文文案 + 英文 options。
+        let c = clarify_of("just erase everything on my computer");
+        assert_eq!(c.reason, ClarifyReason::UnsafeAction);
+        assert!(
+            c.question.is_ascii(),
+            "en clarify question 应为英文，实得 {}",
+            c.question
+        );
+        assert_eq!(
+            c.options.as_deref().unwrap(),
+            ["Show in Finder / Explorer", "Cancel"]
+        );
+        // detect_vague_clarify 路径（ambiguous_type）：英文 options 来自 standard_options。
+        let c = clarify_of("that thing from before");
+        assert_eq!(c.reason, ClarifyReason::AmbiguousType);
+        assert_eq!(
+            c.options.as_deref().unwrap(),
+            ["Documents", "Images", "Videos", "Music"]
+        );
+        assert!(c.question.is_ascii());
+    }
+
+    #[test]
+    fn zh_query_keeps_chinese_options_and_question() {
+        // 中文 query → 中文文案 + 中文 options（既有行为不变）。
+        let c = clarify_of("那个东西在哪");
+        assert_eq!(c.reason, ClarifyReason::AmbiguousType);
+        assert_eq!(
+            c.options.as_deref().unwrap(),
+            ["文档", "图片", "视频", "音乐"]
+        );
+        assert!(!c.question.is_ascii(), "zh clarify question 应为中文");
+    }
+
+    #[test]
+    fn unknown_reason_never_carries_options_either_language() {
+        // Unknown reason 无枚举收窄项 → 双语均 options=None。
+        assert_eq!(clarify_of("帮我看看").options, None);
+        assert_eq!(clarify_of("help me out here").options, None);
+    }
 }
 
 #[cfg(test)]
