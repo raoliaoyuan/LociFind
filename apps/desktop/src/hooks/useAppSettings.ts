@@ -24,7 +24,8 @@ export interface AppSettings {
   semantic_similarity_floor: number | null;
   semantic_weight: number | null;
   index_roots: string[];
-  /** cycle 6 v4：index_roots 非空时是否**追加**系统默认三夹。默认 false（旧覆盖语义）。 */
+  /** 是否纳入系统默认三夹（音乐/文档/图片）。默认 false。
+   *  2026-07-06 起与 index_roots 空否解耦：不勾 + 无自定义 = 默认零索引。 */
   include_system_defaults: boolean;
   /** BETA-39：图片 OCR 文本参与语义索引 opt-in（默认 false，防乱码 OCR 污染召回）。 */
   enable_image_semantics: boolean;

@@ -334,6 +334,174 @@ pub fn cancel_generation_download() -> Result<(), String> {
     Ok(())
 }
 
+// ===================== 2026-07-06（cycle 9 真机反馈）：模型本地发现 + 导入 =====================
+//
+// 真机反馈：重装后 onboarding 直接要求重下模型，但用户本机（其它路径 / 旧数据目录备份）
+// 可能已有同款 .gguf。下载 UI 出现前先做两级检查：
+// ① 默认路径已有完整文件 → 直接报 present（onboarding 显示"已就绪"跳过下载）；
+// ② 否则经 Everything（es.exe）按**精确文件名**全盘发现候选、让用户选择后**复制**进默认
+//    目录（拍板：复制而非引用，不依赖外部文件位置）。es.exe 不可用 → 候选空、走原下载 UI。
+
+impl ModelKind {
+    /// 本地发现可接受的源文件名（大小写不敏感）：canonical 保存名 + HF 原始文件名。
+    /// 精确整名匹配（`wfn:`）——绝不做 `*.gguf` 泛搜，防用户误选其它模型
+    /// （错模型超 context 会触发 ucrtbase abort，BETA-31-v3 cycle 5 实锤）。
+    fn acceptable_source_names(self) -> &'static [&'static str] {
+        match self {
+            // HF 原名 embeddinggemma-300m-qat-Q8_0.gguf 带 -qat 段，与 canonical 不同名。
+            Self::Embedding => &[
+                DEFAULT_EMBED_MODEL_FILE,
+                "embeddinggemma-300m-qat-q8_0.gguf",
+            ],
+            // HF 原名 Qwen3-0.6B-Q4_K_M.gguf 与 canonical 仅大小写差（不敏感 → 同一条）。
+            Self::Generation => &[DEFAULT_GENERATION_MODEL_FILE],
+        }
+    }
+}
+
+/// 候选/导入的最小体积：防 git-lfs pointer / 半截下载误报（两模型实际 313 / 378 MB）。
+const MIN_MODEL_BYTES: u64 = 100 * 1024 * 1024;
+
+fn parse_kind(kind: &str) -> Result<ModelKind, String> {
+    match kind {
+        "embedding" => Ok(ModelKind::Embedding),
+        "generation" => Ok(ModelKind::Generation),
+        other => Err(format!("未知模型种类: {other}")),
+    }
+}
+
+#[derive(Clone, Serialize)]
+pub struct LocalModelCandidate {
+    pub path: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Clone, Serialize)]
+pub struct DiscoverResult {
+    /// 默认路径已有完整模型文件（≥ [`MIN_MODEL_BYTES`]）。
+    pub present: bool,
+    /// 默认期望路径（呈现用）。
+    pub expected_path: String,
+    /// Everything 发现的本机候选（`present=true` 时不扫、恒空）。
+    pub candidates: Vec<LocalModelCandidate>,
+    /// es.exe 是否可用（false 时前端提示"无法自动发现、可手动放置或下载"）。
+    pub everything_available: bool,
+}
+
+/// 本地模型发现（onboarding Step 3/4 挂载时调用；同步文件探测 + es.exe 短查询）。
+#[tauri::command]
+pub fn discover_local_model(kind: String) -> Result<DiscoverResult, String> {
+    let kind = parse_kind(&kind)?;
+    let (_dir, target, _partial) = resolve_target_paths(kind);
+    let expected_path = target.display().to_string();
+
+    if std::fs::metadata(&target).is_ok_and(|m| m.len() >= MIN_MODEL_BYTES) {
+        return Ok(DiscoverResult {
+            present: true,
+            expected_path,
+            candidates: Vec::new(),
+            everything_available: true,
+        });
+    }
+
+    let everything_available = locifind_search_backend_everything::es_cli_available();
+    let mut candidates: Vec<LocalModelCandidate> = Vec::new();
+    if everything_available {
+        let target_key = target.to_string_lossy().to_lowercase();
+        for name in kind.acceptable_source_names() {
+            for p in locifind_search_backend_everything::find_files_named(name, 10) {
+                let key = p.to_string_lossy().to_lowercase();
+                // 排除默认路径自身（不完整文件）与重复项。
+                if key == target_key || candidates.iter().any(|c| c.path.to_lowercase() == key) {
+                    continue;
+                }
+                let Ok(meta) = std::fs::metadata(&p) else {
+                    continue;
+                };
+                if meta.is_file() && meta.len() >= MIN_MODEL_BYTES {
+                    candidates.push(LocalModelCandidate {
+                        path: p.display().to_string(),
+                        size_bytes: meta.len(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(DiscoverResult {
+        present: false,
+        expected_path,
+        candidates,
+        everything_available,
+    })
+}
+
+/// 把发现的本机模型**复制**进默认目录（canonical 文件名）。
+///
+/// 与下载同款原子落盘（copy → `.partial` → rename）+ 同 kind in-flight 守卫（与下载互斥）；
+/// 成功后 emit 与下载一致的 done event，onboarding / 设置页状态机零改动复用。
+#[tauri::command]
+pub async fn import_local_model(
+    app: AppHandle,
+    kind: String,
+    source: String,
+) -> Result<String, String> {
+    let kind = parse_kind(&kind)?;
+    if in_flight(kind)
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err("该模型正在下载/导入中，请先等待或取消".to_string());
+    }
+    let _guard = InFlightGuard(kind);
+
+    let src = PathBuf::from(&source);
+    // 源文件名必须在可接受名单（大小写不敏感）——防误导入任意 .gguf。
+    let src_name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if !kind
+        .acceptable_source_names()
+        .iter()
+        .any(|n| n.eq_ignore_ascii_case(&src_name))
+    {
+        return Err(format!("源文件名不匹配该模型: {src_name}"));
+    }
+    let meta = fs::metadata(&src)
+        .await
+        .map_err(|e| format!("读取源文件失败: {e}"))?;
+    if meta.len() < MIN_MODEL_BYTES {
+        return Err(format!(
+            "源文件过小（{} bytes），疑似不完整，拒绝导入",
+            meta.len()
+        ));
+    }
+
+    let (models_dir, target, partial) = resolve_target_paths(kind);
+    fs::create_dir_all(&models_dir)
+        .await
+        .map_err(|e| format!("创建 models 目录失败: {e}"))?;
+    if fs::metadata(&target)
+        .await
+        .is_ok_and(|m| m.len() >= MIN_MODEL_BYTES)
+    {
+        // 幂等：目标已有完整模型（并发/重复点击），直接成功。
+        emit_done(&app, kind, &target);
+        return Ok(target.display().to_string());
+    }
+
+    if let Err(e) = fs::copy(&src, &partial).await {
+        cleanup_partial(&partial).await;
+        return Err(format!("复制模型失败: {e}"));
+    }
+    if let Err(e) = fs::rename(&partial, &target).await {
+        cleanup_partial(&partial).await;
+        return Err(format!("落盘失败: {e}"));
+    }
+    emit_done(&app, kind, &target);
+    Ok(target.display().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

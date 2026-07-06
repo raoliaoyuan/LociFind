@@ -18,12 +18,13 @@ pub struct AppSettings {
     pub embedding_model_path: Option<String>,
     /// BETA-15B-3 簇A-1：语义相似度下限覆盖（None = 默认 DEFAULT_SIMILARITY_FLOOR）。
     pub semantic_similarity_floor: Option<f32>,
-    /// BETA-27：索引的具体文件夹列表（统一，三臂共用）。空 = 系统默认（Music+Documents+Pictures）。
+    /// BETA-27：索引的具体文件夹列表（统一，三臂共用）。
+    /// **2026-07-06 起：空 + `include_system_defaults=false` = 不索引任何目录**（默认零索引，
+    /// 用户显式添加后才扫；旧语义"空 = 系统默认三夹"已废弃，见 `resolve_index_roots_tagged`）。
     pub index_roots: Vec<String>,
-    /// BETA-33 cycle 6 v4（v0.9.5）：`index_roots` 非空时，是否**追加**系统默认目录
-    /// （Music+Documents+Pictures）一起扫。默认 `false`（旧覆盖语义、零回归：加自定义 = 只扫自定义）。
-    /// 前端「选项 → 索引」用 checkbox 暴露；勾上后前端把配置改成 true 保存、后端追加系统三夹。
-    /// **只在 `index_roots` 非空时生效**（空时本就走系统默认，参数无意义）。
+    /// 是否纳入系统默认目录（Music+Documents+Pictures）。默认 `false`。
+    /// **2026-07-06 起与 `index_roots` 空否解耦**：勾上即纳入三夹（无论有无自定义目录）；
+    /// 不勾则只扫自定义目录（自定义也为空 = 零索引）。前端「选项 → 索引」checkbox 常显。
     pub include_system_defaults: bool,
     /// BETA-27：排除的目录名 glob（basename，树中任何同名子目录被剪枝）。空 = 默认噪声表。
     pub exclude_globs: Vec<String>,
@@ -153,21 +154,22 @@ pub(crate) fn system_default_roots() -> Vec<PathBuf> {
         .collect()
 }
 
-/// 解析索引根 + 每项是否为系统默认。BETA-33 cycle 6 v4 主 API：
-/// - `raw` 为空 → 全部系统默认三夹（`is_default = true`）
-/// - `raw` 非空 + `include_defaults = false` → 只用 `raw`（旧覆盖语义，`is_default = false`）
-/// - `raw` 非空 + `include_defaults = true` → `raw` 与系统三夹合并、去重（保 raw 顺序在前），
-///   系统默认项 `is_default = true`。
+/// 解析索引根 + 每项是否为系统默认。
+///
+/// **2026-07-06（cycle 9 真机反馈）新语义**：系统默认三夹**仅当 `include_defaults = true`
+/// 时纳入**，与 `raw` 空否解耦——默认（`raw` 空 + `include_defaults = false`）**不索引任何
+/// 目录**，用户显式添加目录或勾选系统默认后才开始索引：
+/// - `raw` 为空 + `include_defaults = false` → **空**（默认零索引）
+/// - `raw` 为空 + `include_defaults = true` → 系统三夹（`is_default = true`）
+/// - `raw` 非空 + `include_defaults = false` → 只用 `raw`（`is_default = false`）
+/// - `raw` 非空 + `include_defaults = true` → `raw` 与系统三夹合并、去重（保 raw 顺序在前）
+///
+/// 历史：cycle 6 v4 旧语义在 `raw` 空时兜底返回系统三夹（开箱即索引）；真机反馈认为
+/// 未经同意索引用户目录不妥，改为显式 opt-in。
 pub(crate) fn resolve_index_roots_tagged(
     raw: &[String],
     include_defaults: bool,
 ) -> Vec<(PathBuf, bool)> {
-    if raw.is_empty() {
-        return system_default_roots()
-            .into_iter()
-            .map(|p| (p, true))
-            .collect();
-    }
     let mut out: Vec<(PathBuf, bool)> = raw.iter().map(|s| (PathBuf::from(s), false)).collect();
     if include_defaults {
         let defaults = system_default_roots();
@@ -289,23 +291,25 @@ mod tests {
     // 旧 resolve_index_roots(raw) wrapper cycle 6 v4 已删（无外部 caller、tagged 版覆盖）；
     // 老测 resolve_index_roots_uses_config_when_nonempty 与其一并去掉，新 tagged 覆盖见下。
 
-    /// cycle 6 v4：tagged 版三分支（空 → 全 default；非空+false → 只 raw 且 !is_default；
-    /// 非空+true → raw 在前 + 追加系统默认且不重复且 is_default 标签正确）。
+    /// 2026-07-06 新语义四分支（系统默认仅 include_defaults=true 时纳入、与 raw 空否解耦）：
+    /// 空+false → **空（默认零索引）**；空+true → 系统三夹；
+    /// 非空+false → 只 raw；非空+true → raw 在前 + 追加系统默认（不重复、标签正确）。
     #[test]
-    fn resolve_index_roots_tagged_covers_three_branches() {
-        // 空 raw：全部系统默认（tagged=true 或 false 都一样，raw 主导）。
+    fn resolve_index_roots_tagged_covers_four_branches() {
+        // 空 raw + include=false：默认零索引（cycle 9 真机反馈：未经同意不索引任何目录）。
         let empty_false = resolve_index_roots_tagged(&[], false);
         assert!(
-            empty_false.iter().all(|(_, is_def)| *is_def),
-            "空 raw 时全部项 is_default=true"
+            empty_false.is_empty(),
+            "空 raw + include_defaults=false 应为空（默认零索引），实得 {empty_false:?}"
         );
+        // 空 raw + include=true：系统三夹（显式 opt-in）。
         let empty_true = resolve_index_roots_tagged(&[], true);
-        assert_eq!(
-            empty_false, empty_true,
-            "空 raw 时 include_defaults 参数无影响（本就走系统默认）"
+        assert!(
+            empty_true.iter().all(|(_, is_def)| *is_def),
+            "opt-in 系统默认时全部项 is_default=true"
         );
 
-        // 非空 raw + include=false：只 raw、is_default 全 false（旧覆盖语义）。
+        // 非空 raw + include=false：只 raw、is_default 全 false（覆盖语义不变）。
         let raw = vec!["/tmp/custom1".to_string(), "/tmp/custom2".to_string()];
         let no_default = resolve_index_roots_tagged(&raw, false);
         assert_eq!(no_default.len(), 2);
@@ -548,10 +552,9 @@ pub fn get_settings(app: AppHandle) -> Result<AppSettings, String> {
 /// 设置页用它在 `index_roots` 为空时显示「系统默认（音乐 / 文档 / 图片）」的具体路径、
 /// 让用户清楚知道当前在索引哪些目录、便于决定是否要加自定义目录覆盖默认。
 ///
-/// 与 `resolve_index_roots_tagged` 行为对齐：
-/// - 入参 `index_roots` 非空 + `include_system_defaults=false` → 直接返（旧覆盖语义）
-/// - 入参 `index_roots` 非空 + `include_system_defaults=true` → 与系统三夹合并去重
-/// - 入参 `index_roots` 为空 → 返 dirs::audio_dir / document_dir / picture_dir 并集
+/// 与 `resolve_index_roots_tagged` 行为对齐（2026-07-06 新语义）：
+/// - `include_system_defaults=false` → 只返 `index_roots`（为空即返空 = 默认零索引）
+/// - `include_system_defaults=true` → `index_roots` 与系统三夹合并去重（roots 为空即纯三夹）
 ///
 /// **cycle 6 v2（v0.8.8）**：入参 `index_roots` 可选；前端传当前 useState 值时直接用、
 /// 不传时退到读 settings.json（保留旧调用方兼容）。修旧实现「数据源永远从文件读、
@@ -609,7 +612,7 @@ fn read_effective_inputs(
 #[derive(Debug, Clone, Serialize)]
 pub struct RootIndexOverview {
     pub path: String,
-    /// 是否是系统默认目录（`index_roots` 为空时的回退项）。
+    /// 是否是系统默认目录（`include_system_defaults=true` 时追加的三夹项）。
     pub is_default: bool,
     /// 非图片文档条数（docx / pdf / txt / md / xlsx / pptx / ...）。
     pub doc_count: u64,

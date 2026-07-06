@@ -977,7 +977,11 @@ function RootRow({
   return (
     <>
       <div className={cls} ref={rowRef}>
-        <span className={`prefs-root-path${isSystemDefault ? " sys" : ""}`}>
+        {/* title 冗余：即便布局极窄，hover 也能看全完整路径（cycle 9 真机反馈）。 */}
+        <span
+          className={`prefs-root-path${isSystemDefault ? " sys" : ""}`}
+          title={path}
+        >
           📂 {path}
         </span>
         {isSystemDefault && <span className="prefs-root-tag">系统默认</span>}
@@ -1175,11 +1179,9 @@ function IndexingPane({
       ? dbGrand - grandTotal
       : 0;
 
-  // cycle 7-a：C 修法核心——识别"覆盖语义导致系统默认三夹消失"场景，显示大字醒目提示。
-  // 条件：用户加了自定义目录（index_roots 非空）+ 没勾 include_system_defaults + 系统本来有默认目录（effectiveRoots 里没有非自定义项 = 说明被覆盖了）。
+  // 2026-07-06（cycle 9 真机反馈）新语义：系统默认三夹仅当勾选 include_system_defaults 时
+  // 纳入（与自定义目录空否解耦），checkbox 常显、覆盖语义 banner 退役。
   const hasCustomRoots = settings.index_roots.length > 0;
-  const showSystemDefaultsOverriddenWarning =
-    hasCustomRoots && !settings.include_system_defaults;
 
   // cycle 7-a：pending 集合——settings.index_roots 里但不在 initialIndexRoots 里 = picker 加入未保存。
   const pendingSet = new Set(
@@ -1274,39 +1276,21 @@ function IndexingPane({
             : 0}{" "}
           系统默认）
         </label>
-        {/* cycle 7-a：C 修法核心——覆盖语义时大字醒目提示条，说明系统默认被隐藏 + 引导勾选 checkbox。
-            这是用户在 v0.9.6 报「添加后不显示」的心智模型冲突真凶：Music/Documents/Pictures 消失让新目录被淹没。 */}
-        {showSystemDefaultsOverriddenWarning && (
-          <div className="prefs-warn-banner">
-            <strong>ℹ️ 已隐藏系统默认目录（音乐 / 文档 / 图片）</strong>
-            <p>
-              加了自定义目录后，默认使用「覆盖」模式（只扫自定义目录）。
-              勾选下方 ✅ 后可**同时索引**系统默认三夹。
-            </p>
-          </div>
-        )}
-        {/* cycle 6 v4：include_system_defaults checkbox——只在有自定义目录时才有意义暴露
-            （空 index_roots 时本就走系统默认、参数无效果）。cycle 7-a：加强 UI（绿描边）便于发现。 */}
-        {hasCustomRoots && (
-          <label className="prefs-checkbox prefs-checkbox-strong">
-            <input
-              type="checkbox"
-              checked={settings.include_system_defaults}
-              onChange={(e) =>
-                setSettings({
-                  ...settings,
-                  include_system_defaults: e.target.checked,
-                })
-              }
-            />
-            <strong>同时索引系统默认目录（音乐 / 文档 / 图片）</strong>
-          </label>
-        )}
-        {!hasCustomRoots && (
-          <p className="prefs-hint">
-            未添加自定义目录，当前使用系统默认（音乐 / 文档 / 图片）：
-          </p>
-        )}
+        {/* 2026-07-06 新语义：checkbox 常显——系统三夹纳入与否完全由它决定（默认不勾 =
+            不索引系统目录）；旧「覆盖语义」banner 随之退役（勾选状态自解释）。 */}
+        <label className="prefs-checkbox prefs-checkbox-strong">
+          <input
+            type="checkbox"
+            checked={settings.include_system_defaults}
+            onChange={(e) =>
+              setSettings({
+                ...settings,
+                include_system_defaults: e.target.checked,
+              })
+            }
+          />
+          <strong>同时索引系统默认目录（音乐 / 文档 / 图片）</strong>
+        </label>
         {/* cycle 6 v4：统一按 effectiveRoots 渲染，自定义项显示「移除」、系统默认项显示 tag。
             cycle 7-a：pending 集合传 RootRow 显示琥珀 badge；flashPath 命中的行加 CSS flash 高亮。 */}
         {effectiveRoots?.map((path, i) => {
@@ -1332,7 +1316,9 @@ function IndexingPane({
         })}
         {effectiveRoots && effectiveRoots.length === 0 && (
           <p className="prefs-hint err">
-            ⚠️ 系统未检测到默认音乐 / 文档 / 图片目录，请手动「+ 添加目录」。
+            ⚠️
+            尚未选择任何索引目录——默认不索引、搜索不会有本地索引结果。请「+
+            添加目录」，或勾选上方系统默认目录。
           </p>
         )}
         <button

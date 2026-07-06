@@ -49,8 +49,8 @@ export const IndexRootsStep: React.FC = () => {
   const isEmpty = effectiveRoots !== null && effectiveRoots.length === 0;
   const usingConfigured =
     settings !== null && settings.index_roots.length > 0;
-  const usingDefaults =
-    !usingConfigured || settings?.include_system_defaults === true;
+  // 2026-07-06 新语义：系统默认三夹仅当勾选 include_system_defaults 时纳入（与自定义解耦）。
+  const usingDefaults = settings?.include_system_defaults === true;
 
   return (
     <>
@@ -63,9 +63,9 @@ export const IndexRootsStep: React.FC = () => {
           fontSize: "13px",
         }}
       >
-        LociFind 只扫描你指定的目录。默认索引
-        <strong>桌面、文档、下载</strong>{" "}
-        三个系统文件夹；常用工作目录不在这里、或想索引 D 盘某处，需要手动添加。
+        LociFind <strong>只扫描你明确选择的目录，默认不索引任何位置</strong>
+        。请添加你的常用工作目录（如 D 盘项目文件夹）；也可在索引选项里勾选
+        「系统默认目录（音乐 / 文档 / 图片）」。
       </p>
 
       <div
@@ -121,7 +121,8 @@ export const IndexRootsStep: React.FC = () => {
               lineHeight: 1.5,
             }}
           >
-            当前没有可扫描的目录 — 需在下一步「打开索引选项」里添加至少一个。
+            尚未选择任何目录（默认不索引）——点下方「打开索引选项」添加至少一个，
+            否则搜索不会有本地索引结果。
           </div>
         )}
 
@@ -163,9 +164,9 @@ export const IndexRootsStep: React.FC = () => {
           >
             {usingConfigured
               ? usingDefaults
-                ? "= 你配置的目录 + 系统默认三夹（追加模式）"
+                ? "= 你配置的目录 + 系统默认三夹（音乐 / 文档 / 图片）"
                 : "= 你配置的目录（不含系统默认）"
-              : "= 系统默认三夹（桌面、文档、下载）"}
+              : "= 系统默认三夹（音乐 / 文档 / 图片）"}
           </div>
         )}
       </div>

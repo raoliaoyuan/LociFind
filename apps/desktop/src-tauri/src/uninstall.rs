@@ -407,5 +407,17 @@ mod tests {
             !directive_lines.iter().any(|l| l.contains("settings.json")),
             "hook 指令不得触碰 settings.json（保留配置）"
         );
+        // 2026-07-06（cycle 9 真机反馈拍板）：模型默认保留——hook 必须带 models 暂存
+        // Rename 路径 + MessageBox 询问 + 静默默认保留（/SD IDNO）。
+        assert!(
+            directive_lines
+                .iter()
+                .any(|l| l.contains("Rename") && l.contains("models")),
+            "hook 应含 models 暂存 Rename（默认保留模型、避免重装 ~700MB 重下）"
+        );
+        assert!(
+            content.contains("/SD IDNO"),
+            "hook 的模型删除询问必须带 /SD IDNO（静默卸载默认保留模型、不挂弹窗）"
+        );
     }
 }

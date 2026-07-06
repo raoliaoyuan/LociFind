@@ -917,6 +917,65 @@ fn resolve_es_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("es.exe"))
 }
 
+/// 2026-07-06（cycle 9 真机反馈·模型本地发现）：按**完整文件名**全盘查找文件。
+///
+/// 复用本 crate 的 es.exe 两段式定位（PATH 裸名 → winget Links / `ProgramFiles` 兜底）与
+/// UTF-8 导出解码（`-export-txt -utf8-bom`，规避 stdout 代码页毁 CJK 路径）。`wfn:`
+/// （wholefilename）精确整名匹配、大小写不敏感。es.exe 不可用 / 执行失败 / 非 Windows
+/// → 返回空（调用方按"未发现"降级，不报错）。
+///
+/// 给桌面端「本地已有 .gguf 模型发现」用；不进 [`SearchBackend`] trait 面。
+#[cfg(target_os = "windows")]
+#[must_use]
+pub fn find_files_named(filename: &str, limit: usize) -> Vec<PathBuf> {
+    let program = resolve_es_path();
+    if !executable_exists(&program) {
+        return Vec::new();
+    }
+    let command = EverythingCommand {
+        program,
+        args: vec![
+            "-n".to_owned(),
+            limit.to_string(),
+            format!("wfn:{filename}"),
+        ],
+        exclude_paths: Vec::new(),
+        limit,
+    };
+    let cancel = CancellationToken::new();
+    match run_es_cli(&command, &cancel) {
+        Ok(text) => text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(PathBuf::from)
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// 非 Windows 平台：Everything 不可用，恒返回空。
+#[cfg(not(target_os = "windows"))]
+#[must_use]
+pub fn find_files_named(_filename: &str, _limit: usize) -> Vec<PathBuf> {
+    Vec::new()
+}
+
+/// es.exe 是否可用（两段式定位命中任一候选）。调用方据此区分
+/// [`find_files_named`] 返回空是"没找到"还是"Everything 不可用"。
+#[cfg(target_os = "windows")]
+#[must_use]
+pub fn es_cli_available() -> bool {
+    executable_exists(&resolve_es_path())
+}
+
+/// 非 Windows 平台：恒 false。
+#[cfg(not(target_os = "windows"))]
+#[must_use]
+pub const fn es_cli_available() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]

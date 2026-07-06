@@ -363,6 +363,16 @@ PROTO-01 ─┬→ PROTO-02 ─┬→ PROTO-04 → PROTO-05 ──┬→ PROTO-0
 
 **B 阶段预期总工期**：8-12 周（B6 / B7 不上关键路径）。
 
+#### B8：cycle 9 真机反馈（2026-07-06 v0.9.15 首测三条，用户拍板逐条登记）
+
+> 来源：用户 v0.9.15 Windows 装机真机测试首批反馈。三项拍板（2026-07-06）：卸载默认保模型可勾选删 / 本地发现后**复制**进默认目录 / ①②当场做、③下会话。不进 §6.3 出场指标。
+
+| ID | 标题 | 状态 | 模块 | 依赖 | 估时 |
+|---|---|---|---|---|---|
+| **BETA-45** | **模型本地发现 + 卸载默认保留模型**（真机反馈①：重装后被迫重下 ~700MB） | **done（2026-07-06 代码层）**：(a) NSIS 卸载 hook 改「模型默认保留」——MessageBox 询问删否（默认/静默 `/SD IDNO` = 保留）、保留经 models 同卷 Rename 暂存→整删→移回（敏感派生数据零遗漏）、$UpdateMode 守卫不变、闸门测试加 Rename models + `/SD IDNO` 断言；应用内「卸载清理」仍全删含模型（§6.3 指标不受影响）。(b) 下载 UI 前两级本地发现——默认路径已有完整文件（≥100MB）→ 直接就绪跳过下载；否则 everything crate 新公开 `find_files_named`/`es_cli_available`（复用 es.exe 两段式定位 + UTF-8 导出解码）按**精确文件名**全盘发现候选（绝不 `*.gguf` 泛搜、防错模型 ucrtbase abort），「使用此文件」经 `import_local_model` 复制进默认目录（校验文件名白名单 + ≥100MB + `.partial`→rename 原子落盘 + 与下载共用 in-flight 守卫与 done event，前端状态机零改动）。**待真机验证**（随下次装机） | apps/desktop + packages/search-backends/everything | — | 0.5d |
+| **BETA-46** | **默认零索引 + 目录列表 UX**（真机反馈②：未经同意不应索引系统目录；路径截断看不全） | **done（2026-07-06 代码层）**：`resolve_index_roots_tagged` 新语义——系统三夹**仅当 `include_system_defaults=true`** 时纳入、与 `index_roots` 空否解耦（空+false = **零索引**）；checkbox 常显（覆盖语义 banner 退役）；onboarding Step 5 / 设置页空态文案改「默认不索引、请添加」；目录路径退役 ellipsis 截断改完整显示（自然换行 + title hover）。settings 测试改四分支 + desktop 168 全过。**行为变化注意**：旧装机若 index_roots 为空，升级后停止索引系统三夹（需重新勾选或添加目录）——beta 阶段接受、随 cycle 9 复测确认。**待真机验证** | apps/desktop | — | 0.5d |
+| **BETA-47** | **选项页重构**（真机反馈③：拆 tab = 常规 / 索引（本地索引配置）/ Everything（检测+开关）/ 语义召回（含模型下载与管理）/ Windows（系统集成）/ 隐私与记录 / 杂项；PreferencesDialog.tsx 1579 行拆文件） | not_started（下会话；Everything 目前无任何前端配置项、需新增 `enable_everything` 设置 + 条件注册） | apps/desktop | BETA-45, BETA-46 | 1-2d |
+
 #### 代码整洁 / 技术债 backlog（非关键路径，随手可做）
 
 > 2026-06-03 "消冗余 + 上下文优化"梳理产生的可选后续项（均不阻塞功能）。已完成部分见 STATUS 同日会话日志 + [docs/session-logs/](../docs/session-logs/)。

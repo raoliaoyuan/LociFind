@@ -1592,12 +1592,12 @@ body {
   margin-top: 0.15rem;
 }
 
-/* root 行加中间统计列 + 上次索引；路径吃剩余 min-width:0 避免 CJK 长路径撑爆 */
+/* root 行加中间统计列 + 上次索引；路径吃剩余 min-width:0 避免 CJK 长路径撑爆。
+   2026-07-06（cycle 9 真机反馈）：完整路径必须可见——退役 ellipsis 单行截断，
+   长路径自然换行（基类已有 word-break: break-all），行高随内容撑开。 */
 .prefs-root-row .prefs-root-path {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .prefs-root-stats {
@@ -1617,30 +1617,8 @@ body {
 
 /* ---------- BETA-33 cycle 7-a：索引 pane UX 打磨（C/B 修法 + 数据源统一 + 进度可视化） ---------- */
 
-/* C 修法核心：覆盖语义醒目提示条（系统默认三夹被隐藏时显示）。
-   琥珀色 + 加粗 strong，直接放在 checkbox 上方，避免"系统默认消失"心智冲突。 */
-.prefs-warn-banner {
-  border: 1px solid #ff9500;
-  background: rgba(255, 149, 0, 0.08);
-  border-left: 4px solid #ff9500;
-  padding: 0.55rem 0.75rem;
-  border-radius: 4px;
-  margin-bottom: 0.6rem;
-}
-
-.prefs-warn-banner strong {
-  color: #b26200;
-  font-size: 0.85rem;
-  display: block;
-  margin-bottom: 0.25rem;
-}
-
-.prefs-warn-banner p {
-  margin: 0;
-  font-size: 0.78rem;
-  color: var(--muted);
-  line-height: 1.5;
-}
+/* （cycle 7-a 覆盖语义提示条 .prefs-warn-banner 已随 2026-07-06 新语义退役删除——
+    checkbox 常显自解释，无隐藏行为需要警告。） */
 
 /* checkbox 强化：绿描边框 + 加粗，让 opt-in「同时索引系统默认」按钮更醒目。 */
 .prefs-checkbox-strong {

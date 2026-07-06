@@ -2,6 +2,42 @@
 
 > STATUS.md 只放摘要；本文件按月留改动概览、验证输出、决策细节。最新在顶部。
 
+## 2026-07-06（续 2）— Claude Code (Fable 5) — v0.9.15 并发发版 + cycle 9 首批真机反馈落地（BETA-45/46）
+
+### 承接
+用户拍板 push + 并发发版 → 上机测试 v0.9.15 → 回报三条真机反馈（模型重下 / 默认索引系统目录 / 选项页重构）→ 三项拍板（卸载默认保模型可勾选删 / 发现后**复制**进默认目录 / ①②当场做、③下会话）→ 当场实现。
+
+### 发版（v0.9.15，并发首验双通过）
+- bump 0.9.14→0.9.15（tauri.conf + src-tauri/Cargo.toml + Cargo.lock `--locked` 验证）→ tag 推送触发 **windows + macos 两 workflow 并发**。
+- **Release macOS 首验 success**（`LociFind_0.9.15_aarch64.dmg` + app.tar.gz 产出）——上一 commit 的"未验证"风险闭合；**Release Windows success**（`LociFind_0.9.15_x64-setup.exe`）。
+- 并发追加机制验证成立：先完成者建 Release、后完成者幂等追加资产到同一 tag。changelog 以 [release-notes-v0.9.15-draft](../reviews/release-notes-v0.9.15-draft.md) `gh release edit` 补全。
+- 踩坑：`gh run watch` 两次假退出（exit 0/1 但 run 仍 in_progress）——改用 `gh run view --json status` 轮询才可靠。
+
+### 真机反馈诊断
+- **反馈①根因**：BETA-12 卸载 hook 非升级卸载 `RMDir /r $APPDATA\LociFind` 整目录删除、models 在内——用户"卸载旧版→装新版"即触发 ~700MB 重下（设计张力：模型是公开权重非敏感数据）。
+- **反馈②根因**：`resolve_index_roots_tagged` 在 `index_roots` 为空时兜底返回系统三夹（cycle 6 v4 旧语义）= 开箱即索引用户目录。
+- 代码面经 Explore 子代理全图梳理（onboarding 6 步 / PreferencesDialog 4 tab 1579 行 / 模型状态机 / Everything 集成点）。
+
+### BETA-45 落地（模型本地发现 + 卸载保模型）
+- **NSIS hook**（[uninstall-hooks.nsh](../../apps/desktop/src-tauri/nsis/uninstall-hooks.nsh)）：MessageBox 询问删模型否、默认/静默 `/SD IDNO` = 保留；保留经 models 同卷 Rename 暂存→整删→移回（敏感派生数据零遗漏、新增子项自动纳入删除面）；$UpdateMode 守卫不变；[uninstall.rs](../../apps/desktop/src-tauri/src/uninstall.rs) 闸门测试 +2 断言（Rename models / `/SD IDNO`）。应用内清理仍全删（§6.3 指标不动）。
+- **everything crate**（[lib.rs](../../packages/search-backends/everything/src/lib.rs)）：新公开 `find_files_named(filename, limit)`（`wfn:` 精确整名 + 复用 es 两段式定位与 `-export-txt -utf8-bom` 解码）+ `es_cli_available()`；非 Windows 恒空/false。
+- **desktop 命令**（[model_download.rs](../../apps/desktop/src-tauri/src/model_download.rs)）：`discover_local_model`（默认路径 ≥100MB → present；否则按 kind 白名单文件名发现候选，embedding 双名〔canonical + HF `-qat` 原名〕、generation 单名）+ `import_local_model`（白名单校验 + ≥100MB + copy→`.partial`→rename 原子落盘 + 复用下载 in-flight 守卫与 done event）。main.rs 注册。
+- **前端**（[ModelDownloadStep.tsx](../../apps/desktop/src/components/ModelDownloadStep.tsx)）：mount 时 discover——present 直接就绪进下一步；候选列表「使用此文件（复制）」；Everything 未装提示手动放置。import 走既有 done event、状态机零改动。
+
+### BETA-46 落地（默认零索引 + 目录 UX）
+- [settings.rs](../../apps/desktop/src-tauri/src/settings.rs)：`resolve_index_roots_tagged` 新语义——三夹**仅当 include_system_defaults=true** 纳入、与 raw 空否解耦（空+false = 零索引）；测试改四分支（空+false 断言空）。
+- [PreferencesDialog.tsx](../../apps/desktop/src/components/PreferencesDialog.tsx)：checkbox 常显、覆盖语义 banner 退役（CSS 同删）、空态改「默认不索引、请添加或勾选」、路径 title hover。
+- [styles.css](../../apps/desktop/src/styles.css)：`.prefs-root-path` 退役 ellipsis 单行截断 → `overflow-wrap: anywhere` 完整显示。
+- [IndexRootsStep.tsx](../../apps/desktop/src/components/onboarding/IndexRootsStep.tsx)：文案改新语义（顺带修错写的「桌面、文档、下载」→ 实际三夹是音乐/文档/图片）；`usingDefaults` 与自定义解耦。
+- **行为变化**：旧装机 index_roots 空者升级后停止索引三夹（须重新勾选）——beta 接受、卡内注记。
+
+### 验证
+desktop 168 全过（全量 365s）· everything 15 · settings 四分支/uninstall 闸门/model_download 全绿 · tsc / vite build 净 · clippy `-D warnings` / fmt 净。
+
+### 未尽事宜
+- BETA-45/46 待随下次发版真机验证（NSIS 弹窗须真装真卸）；BETA-47 选项页重构下会话（含 `enable_everything` 开关等）。
+- v0.9.15 其余 cycle 9 场景测试继续中（用户侧）。
+
 ## 2026-07-06（续）— Claude Code (Opus 4.8) — clarify i18n 双语化 + macOS DMG CI
 
 ### 承接
