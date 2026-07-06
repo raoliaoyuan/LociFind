@@ -2,6 +2,31 @@
 
 > STATUS.md 只放摘要；本文件按月留改动概览、验证输出、决策细节。最新在顶部。
 
+## 2026-07-06（续 3）— Claude Code (Fable 5) — v0.9.16/17 双发版 + 真机反馈二轮修复
+
+### 承接
+BETA-45/46 落地后用户拍板「push 发 v0.9.16」→ 装机实测回报下载卡死链 + 布局问题 → 逐条修复（用户选 b：攒批再发）→ 用户拍板「发版」→ v0.9.17。
+
+### v0.9.16 发版（macOS 首跑踩坑 + 修复）
+- bump c9828b0 → tag 触发并发；**Windows success、macOS failure（E0433）**：everything crate 是 Windows target-gated 依赖，model_download.rs 模型发现代码无条件引用——加 `es_cli_available`/`es_find_files_named` 平台 shim（4160b60）。
+- 修复经 `gh workflow run release-macos.yml -f tag=v0.9.16` **dispatch 重跑 success**（DMG 追加至同一 Release，无须重打 tag）；changelog 补全（含升级注意：空 roots 老装机须重新勾选系统默认）。
+- 教训：跨平台代码引用 target-gated 依赖必须 cfg gate；双平台 CI 第二跑就抓住了 Windows 本机永远编不出的错误。
+
+### 真机反馈二轮（v0.9.16 装机实测，三项修复入 v0.9.17）
+1. **下载卡死链**（9c26f4c）：根因链 = HF 连接阶段长挂占满 in-flight 守卫 300s（旧配置仅整请求 timeout）→ cancel flag 只在 chunk loop 检查、连接阶段取消无效 → 前端切步重挂回 idle 与后端守卫脱节（无取消入口）→「使用此文件」/「重试」全被守卫弹回。修复：`download_model_impl` 每源 `tokio::select` 与 `wait_cancelled`（300ms 轮询）竞速（drop 下载 future + 清 partial）；`connect_timeout(15s)`；**URL 链主源→hf-mirror.com 镜像兜底**（取消不切换；PRIVACY.md 联网点同步）；新命令 `model_download_in_flight`（useModelDownload mount 时查询恢复「下载中+取消」态）；import 守卫文案引导先取消。测试 +2（wait_cancelled 置位即返 / urls 链同路径）。
+2. **取消误报「下载失败」**（2db77bd）：事件路径已过滤「用户取消下载」，但 `start()` 的 invoke-catch 路径没过滤——取消后命令 Err 拒绝覆盖 idle 为 error。catch 同样过滤该 reason。
+3. **目录三行卡片布局**（0121063）：上轮「换行显示完整路径」在单行 flex 下被统计列+按钮挤成逐字断行（真机截图实锤）——RootRow 改纵向三行（完整路径+标签 / 统计+上次索引 / 操作按钮），卡片下边框分隔；「上次索引」加文字前缀。
+
+### v0.9.17 发版
+bump a692a10 → tag → **双平台一次 success**（并发机制三连稳：15 首验 / 16 修复重跑 / 17 一次过）；changelog 补全（[草稿](../reviews/release-notes-v0.9.17-draft.md)）。
+
+### 验证
+desktop 170 全过（540s 全量）· tsc / vite build 净 · clippy `-D warnings` / fmt 净（各修复轮均过）。
+
+### 未尽事宜
+- v0.9.17 待用户真机验证：升级零数据损失 / 下载取消即刻生效 / 切步恢复下载态 / 镜像兜底 / 三行布局 / 卸载保模型弹窗 / 零索引空态 / clarify 英文追问。
+- `gh run watch` 假退出 ×3 实锤——一律用 `gh run view --json status` 轮询（流程备忘）。
+
 ## 2026-07-06（续 2）— Claude Code (Fable 5) — v0.9.15 并发发版 + cycle 9 首批真机反馈落地（BETA-45/46）
 
 ### 承接

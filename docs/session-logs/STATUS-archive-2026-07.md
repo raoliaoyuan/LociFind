@@ -529,3 +529,10 @@ _BETA-31-v3 cycle 1-5（第 1-6 刀）+ 2026-06-29 v0.8.0 UX gap 第 1 刀 共 6
 **续 5（同日 BETA-10/10A 文档层 done）**：[install.md](docs/install.md)（SmartScreen 放行 + SHA256 校验 + 升级/卸载、Gatekeeper 三路径〔含 macOS 15 新口径〕+ ad-hoc、源码构建、可选模型）；[渠道评估](docs/reviews/beta-10-distribution-channels-2026-07-04.md)（Scoop 先行→winget 待稳定期→Homebrew tap 待 DMG CI）；README 安装节 + Release body 挂链。两卡转 in_progress，剩 DMG CI + 真机安装验证。
 **续 6（同日首个公开发版 done）**：bump v0.9.14（tauri.conf + Cargo.toml + lock `--locked` 验证）、tag 推公开 origin 触发 release-windows.yml（run 28708792924 **success**，NSIS 卸载 hook 首次真实构建通过、安装包 + sha256 出）；`gh release edit` 补 changelog（[草稿](docs/reviews/release-notes-v0.9.14-draft.md)，prerelease）；Scoop bucket **仓库 [scoop-locifind](https://github.com/raoliaoyuan/scoop-locifind) 建成上线**（manifest 填真 hash `4e525b…`、installer/uninstaller 脚本按实测 `%LOCALAPPDATA%\LociFind` 路径、autoupdate；远端 manifest JSON 校验有效）；种子入 [scripts/packaging/scoop/](scripts/packaging/scoop/README.md)。
 **未尽事宜**：v0.9.14 真机验证（cycle 9 + BETA-10A + Scoop 装机路径）随下次上机，归下一步 ②。
+
+### 2026-07-06（续）— Claude Code (Opus 4.8) — clarify i18n 双语化 + macOS DMG CI
+
+**承接**：上一 commit 后用户复问「本次会话该做什么」→ 重评纯代码只剩两项 → 用户选「A+B 都做」。
+**B（i18n，本机验证）**：clarify options/question 按 language 双语——`pick`/`standard_options(reason, language)`，顶层 4 类就地 `bilingual_options`、vague 5 类走 `pick`；mixed 归中文。eval-neutral（evals 不校验 clarify 文案/options，v0.9 994、v0.5 495 不变）；intent-parser 235→238（+3 i18n 测）、clippy/fmt 净。闭合 beta-exit §6 记的既有缺口。
+**A（DMG CI，仅 YAML 校验）**：[release-macos.yml](.github/workflows/release-macos.yml) 镜像 windows 版（macos-14 + aarch64 + 同款守门/features + Gatekeeper releaseBody）。可编依据=daemon workflow 已在 macos-14 编 llama。**风险**：本机无 macOS runner，下次 macOS 发版首验；windows+macos 并行同吃 v* tag、往同一 Release 幂等追加（已注释写明）。
+**未尽事宜**：A 待 macOS 发版真机首验（BETA-10 剩真机放行验证）。详录 → [session-details-2026-07.md](docs/session-logs/session-details-2026-07.md)。

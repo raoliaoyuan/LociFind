@@ -8,13 +8,13 @@
 
 - **阶段**：B（Beta）进行中；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**v0.9.15 并发发版（macOS DMG CI 首验✅）+ cycle 9 首批真机反馈落地**——BETA-45（模型本地发现 + 卸载默认保模型）/ BETA-46（默认零索引 + 目录完整路径）代码层 done、待随下次发版真机验证；BETA-47（选项页重构）登记待下会话（ROADMAP B8）。前一轮：clarify i18n + release-macos.yml。
-- **下一步 top-3**：① v0.9.15 cycle 9 真机测试继续（用户进行中）+ 下次发版验 BETA-45/46（NSIS 弹窗须真装真卸）；② BETA-47 选项页重构（ROADMAP B8，含 Everything 开关 / 模型管理归位 / tab 拆分）；③ 设计伙伴/首个真实部署主动获取（护城河 P0）与双平台真机复跑填 [beta-exit.md](docs/reviews/beta-exit.md) TODO 格。
+- **当前 task**：**v0.9.16/17 双发版 + 真机反馈二轮修复 done**——v0.9.16 随包 BETA-45/46（macOS CI 踩 target-gated 依赖坑、shim 修复重跑过）；实测暴露下载卡死链 → 修复四刀 + **hf-mirror 镜像兜底** + 目录三行卡片布局，随 v0.9.17 发布（双平台一次过）。待用户 v0.9.17 真机验证。
+- **下一步 top-3**：① v0.9.17 真机验证（用户进行中：下载取消/镜像兜底/三行布局/卸载保模型/零索引空态/clarify 英文追问/升级零损失）；② BETA-47 选项页重构（ROADMAP B8，含 Everything 开关 / 模型管理归位 / tab 拆分）；③ 设计伙伴/首个真实部署主动获取（护城河 P0）与双平台真机复跑填 [beta-exit.md](docs/reviews/beta-exit.md) TODO 格。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（clarify options 结构口径 2026-07-06 方案 A 拍板落地）。
 
 ## 当前 Task
 
-**2026-07-06 II（最新）**：**v0.9.15 并发发版 + cycle 9 首批真机反馈落地**。① 发版：bump v0.9.15 → windows+macos 两 workflow 并发首跑**双 success**（macOS DMG CI 首验通过、并发同 Release 幂等追加机制成立），changelog 补全。② 用户真机测试回报三条反馈、三项拍板（卸载默认保模型可勾选删 / 本地发现后复制进默认目录 / ①②当场做③下会话）→ 当场落地：**BETA-45**（NSIS 卸载默认保留模型〔`/SD IDNO`、同卷 Rename 暂存〕+ everything crate 新公开 `find_files_named`/`es_cli_available` + `discover_local_model`/`import_local_model` 命令 + ModelDownloadStep 发现 UI）、**BETA-46**（`resolve_index_roots_tagged` 新语义：三夹仅勾选时纳入、空+false=零索引；checkbox 常显、banner 退役、路径完整显示）。BETA-47 登记 not_started（ROADMAP B8）。desktop 168 / everything 15 全过、tsc/vite/clippy/fmt 净。详录 [session-details-2026-07](docs/session-logs/session-details-2026-07.md)。
+**2026-07-06 III（最新）**：**v0.9.16/17 双发版 + 真机反馈二轮修复**。① v0.9.16 发版：macOS CI 首跑 E0433（everything crate target-gated 依赖被无条件引用）→ 平台 shim 修复 → dispatch 重跑 success（无须重打 tag）。② v0.9.16 装机实测回报 → 三项修复：**下载卡死链**（HF 连接阶段长挂占守卫 300s、取消无效、前端状态脱节 → select 取消竞速 + connect_timeout 15s + **hf-mirror 镜像兜底** + model_download_in_flight 前端感知 + PRIVACY 同步）、取消误报「下载失败」（invoke-catch 路径补过滤）、目录**三行卡片布局**（单行 flex 逐字断行 → 路径/统计/按钮分行）。③ v0.9.17 发版双平台一次 success（并发机制三连稳）、changelog 补全。desktop 170 全过 + tsc/vite/clippy/fmt 净。流程备忘：`gh run watch` 假退出 ×3，一律 `gh run view --json status` 轮询。详录 [session-details-2026-07](docs/session-logs/session-details-2026-07.md)。
 
 ## 下一步
 
@@ -38,6 +38,14 @@
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
 
+### 2026-07-06 III — Claude Code (Fable 5) — v0.9.16/17 双发版 + 真机反馈二轮修复
+
+**承接**：用户拍板发 v0.9.16 → 装机实测回报下载卡死链等 → 逐条修复攒批 → 拍板发 v0.9.17。
+**发版**：v0.9.16 macOS 首跑 E0433（target-gated 依赖坑）→ shim 修复 + dispatch 重跑 success；v0.9.17 双平台一次 success，并发机制三连稳。changelog 均补全。
+**产出**：下载卡死链修复四刀（select 取消竞速〔连接阶段即刻生效〕+ connect_timeout 15s + hf-mirror 镜像兜底〔PRIVACY 同步〕+ model_download_in_flight 前端恢复下载态）；取消误报失败修复（invoke-catch 补过滤）；目录三行卡片布局（路径/统计/按钮分行）。BETA-45 真机首验：发现 UI 工作（Everything 命中 artifacts 模型）。
+**结果**：desktop 170 全过、tsc/vite/clippy/fmt 净；[Release v0.9.17](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.17) exe+DMG 齐。
+**未尽事宜**：v0.9.17 待用户验证（取消即刻生效/镜像/三行布局/卸载保模型弹窗/零索引空态/升级零损失）；`gh run watch` 假退出 ×3 → 一律 --json 轮询。详录 → [session-details-2026-07.md](docs/session-logs/session-details-2026-07.md)。
+
 ### 2026-07-06 II — Claude Code (Fable 5) — v0.9.15 并发发版 + cycle 9 真机反馈落地（BETA-45/46）
 
 **承接**：用户拍板 push + 并发发版 → 真机测 v0.9.15 → 回报三条反馈 → 三项拍板后当场实现 ①②、③登记下会话。
@@ -45,13 +53,6 @@
 **产出**：**BETA-45** 模型本地发现 + 卸载默认保模型（NSIS `/SD IDNO` + 同卷 Rename 暂存；everything `find_files_named`〔wfn: 精确名 + UTF-8 导出〕；discover/import 命令 + 白名单 + 原子落盘 + 复用下载 done event；ModelDownloadStep 发现 UI）；**BETA-46** 默认零索引（`resolve_index_roots_tagged` 三夹仅勾选纳入、空+false=零索引）+ checkbox 常显 + banner 退役 + 路径完整显示；**BETA-47** 选项页重构登记（ROADMAP 新 B8 小节）。
 **结果**：desktop 168 / everything 15 / settings 四分支 / uninstall 闸门（+2 断言）全绿；tsc/vite/clippy `-D warnings`/fmt 净。根因诊断：反馈① = BETA-12 整目录删含模型；反馈② = 空 roots 兜底三夹旧语义。
 **未尽事宜**：BETA-45/46 随下次发版真机验证（NSIS 弹窗须真装真卸）；升级行为变化（空 roots 老装机停索三夹）随 cycle 9 复测确认；BETA-47 下会话。详录 → [session-details-2026-07.md](docs/session-logs/session-details-2026-07.md)。
-
-### 2026-07-06（续）— Claude Code (Opus 4.8) — clarify i18n 双语化 + macOS DMG CI
-
-**承接**：上一 commit 后用户复问「本次会话该做什么」→ 重评纯代码只剩两项 → 用户选「A+B 都做」。
-**B（i18n，本机验证）**：clarify options/question 按 language 双语——`pick`/`standard_options(reason, language)`，顶层 4 类就地 `bilingual_options`、vague 5 类走 `pick`；mixed 归中文。eval-neutral（evals 不校验 clarify 文案/options，v0.9 994、v0.5 495 不变）；intent-parser 235→238（+3 i18n 测）、clippy/fmt 净。闭合 beta-exit §6 记的既有缺口。
-**A（DMG CI，仅 YAML 校验）**：[release-macos.yml](.github/workflows/release-macos.yml) 镜像 windows 版（macos-14 + aarch64 + 同款守门/features + Gatekeeper releaseBody）。可编依据=daemon workflow 已在 macos-14 编 llama。**风险**：本机无 macOS runner，下次 macOS 发版首验；windows+macos 并行同吃 v* tag、往同一 Release 幂等追加（已注释写明）。
-**未尽事宜**：A 待 macOS 发版真机首验（BETA-10 剩真机放行验证）。详录 → [session-details-2026-07.md](docs/session-logs/session-details-2026-07.md)。
 
 ### 2026-07-06 — Claude Code (Opus 4.8 / Fable 5) — BETA-14 出场报告骨架 + clarify options 方案 A + 老账收割至 99.4%
 
