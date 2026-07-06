@@ -1,6 +1,6 @@
 {
   "productName": "LociFind",
-  "version": "0.9.14",
+  "version": "0.9.15",
   "identifier": "ai.locifind.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
