@@ -409,11 +409,27 @@ body {
   color: var(--muted);
 }
 
+/* 2026-07-06（cycle 9 真机反馈二轮）：三行卡片式——纵向排（路径 / 统计 / 操作），
+   单行 flex 会把路径挤到极窄逐字断行。卡片间用下边框分隔。 */
 .prefs-root-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.2rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.prefs-root-line {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.18rem 0;
+  min-width: 0;
+}
+
+.prefs-root-actions {
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .prefs-root-path {
@@ -1592,9 +1608,8 @@ body {
   margin-top: 0.15rem;
 }
 
-/* root 行加中间统计列 + 上次索引；路径吃剩余 min-width:0 避免 CJK 长路径撑爆。
-   2026-07-06（cycle 9 真机反馈）：完整路径必须可见——退役 ellipsis 单行截断，
-   长路径自然换行（基类已有 word-break: break-all），行高随内容撑开。 */
+/* 2026-07-06（cycle 9 真机反馈二轮）：路径独占卡片第 1 行整宽——极长路径仍可
+   自然换行兜底（word-break 在基类），常规路径单行完整可见。 */
 .prefs-root-row .prefs-root-path {
   min-width: 0;
   overflow-wrap: anywhere;

@@ -976,71 +976,78 @@ function RootRow({
   };
   return (
     <>
+      {/* 2026-07-06（cycle 9 真机反馈二轮）：三行卡片式布局——单行 flex 会把路径列
+          挤到极窄逐字断行。行 1 完整路径（独占整宽）、行 2 索引内容统计、行 3 操作按钮。 */}
       <div className={cls} ref={rowRef}>
-        {/* title 冗余：即便布局极窄，hover 也能看全完整路径（cycle 9 真机反馈）。 */}
-        <span
-          className={`prefs-root-path${isSystemDefault ? " sys" : ""}`}
-          title={path}
-        >
-          📂 {path}
-        </span>
-        {isSystemDefault && <span className="prefs-root-tag">系统默认</span>}
-        {isPending && (
-          <span className="prefs-root-tag pending" title="picker 加入但未保存">
-            ⏳ 待应用
-          </span>
-        )}
-        <span
-          className="prefs-root-stats"
-          title="该目录下索引条数（文档 · 图片 · 音乐）"
-        >
-          {stats}
-        </span>
-        {lastIndexed && (
+        <div className="prefs-root-line">
           <span
-            className="prefs-root-time"
-            title={`上次索引：${overview?.last_indexed_time ?? ""}`}
+            className={`prefs-root-path${isSystemDefault ? " sys" : ""}`}
+            title={path}
           >
-            {lastIndexed}
+            📂 {path}
           </span>
-        )}
-        {excludeEditable && (
-          <button
-            type="button"
-            className={`prefs-btn small${patterns.length > 0 ? " has-excludes" : ""}`}
-            onClick={() => setExpanded(!expanded)}
-            title="配置该目录下的子路径排除（通配符）"
+          {isSystemDefault && <span className="prefs-root-tag">系统默认</span>}
+          {isPending && (
+            <span className="prefs-root-tag pending" title="picker 加入但未保存">
+              ⏳ 待应用
+            </span>
+          )}
+        </div>
+        <div className="prefs-root-line">
+          <span
+            className="prefs-root-stats"
+            title="该目录下索引条数（文档 · 图片 · 音乐）"
           >
-            {expanded ? "▾" : "▸"} 子路径排除
-            {patterns.length > 0 ? ` (${patterns.length})` : ""}
-          </button>
-        )}
-        {onOpenDir && (
-          <button
-            type="button"
-            className="prefs-btn small"
-            onClick={onOpenDir}
-            title="在系统文件管理器中打开该目录"
-          >
-            打开
-          </button>
-        )}
-        {onRescan && (
-          <button
-            type="button"
-            className="prefs-btn small"
-            onClick={onRescan}
-            disabled={rescanDisabled}
-            title="只重扫该目录（排除规则仍生效，不影响其他目录）"
-          >
-            重扫
-          </button>
-        )}
-        {onRemove && (
-          <button type="button" className="prefs-btn small" onClick={onRemove}>
-            移除
-          </button>
-        )}
+            {stats}
+          </span>
+          {lastIndexed && (
+            <span
+              className="prefs-root-time"
+              title={`上次索引：${overview?.last_indexed_time ?? ""}`}
+            >
+              上次索引 {lastIndexed}
+            </span>
+          )}
+        </div>
+        <div className="prefs-root-line prefs-root-actions">
+          {excludeEditable && (
+            <button
+              type="button"
+              className={`prefs-btn small${patterns.length > 0 ? " has-excludes" : ""}`}
+              onClick={() => setExpanded(!expanded)}
+              title="配置该目录下的子路径排除（通配符）"
+            >
+              {expanded ? "▾" : "▸"} 子路径排除
+              {patterns.length > 0 ? ` (${patterns.length})` : ""}
+            </button>
+          )}
+          {onOpenDir && (
+            <button
+              type="button"
+              className="prefs-btn small"
+              onClick={onOpenDir}
+              title="在系统文件管理器中打开该目录"
+            >
+              打开
+            </button>
+          )}
+          {onRescan && (
+            <button
+              type="button"
+              className="prefs-btn small"
+              onClick={onRescan}
+              disabled={rescanDisabled}
+              title="只重扫该目录（排除规则仍生效，不影响其他目录）"
+            >
+              重扫
+            </button>
+          )}
+          {onRemove && (
+            <button type="button" className="prefs-btn small" onClick={onRemove}>
+              移除
+            </button>
+          )}
+        </div>
       </div>
       {excludeEditable && expanded && (
         <div className="prefs-root-excludes">
