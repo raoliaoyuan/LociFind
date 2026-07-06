@@ -459,7 +459,8 @@
       "keywords": [
         "碳中和目标"
       ],
-      "sort": "modified_desc"
+      "sort": "modified_desc",
+      "file_type": "document"
     }
   },
   {
@@ -611,7 +612,6 @@
       "intent": "file_search",
       "schema_version": "1.0",
       "language": "zh",
-      "file_type": "document",
       "keywords": [
         "保密协议"
       ],

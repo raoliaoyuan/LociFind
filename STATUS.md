@@ -6,17 +6,15 @@
 
 ## 📍 速览
 
-- **阶段**：B（Beta）进行中；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 97.7%**，出场判定余双平台真机复跑。
+- **阶段**：B（Beta）进行中；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**开源化整线落地 + 首个公开发版 done**——双许可 + PRIVACY + 脱敏（BETA-00 done）→ 仓库转公开（orphan 首发，archive 冻结保全史）→ CONTRIBUTING/模板 + install.md/渠道评估（BETA-10/10A 文档层）→ **v0.9.14 CI 成功（NSIS hook 首次真实构建通过）+ changelog 补全 + Scoop bucket `scoop-locifind` 上线**。前一轮：evals 97.7% + BETA-29 v2 代码层完。
-- **下一步 top-3**：① 设计伙伴/首个真实部署主动获取（护城河 P0，开源免费降低试用门槛）；② BETA-33 cycle 9 真机验证（随下次发版，验证面含 BETA-43 出处 + BETA-12 卸载/升级 + BETA-29 草稿 v1+v2）；③ v0.9.14 装机真机验证（cycle 9 六场景 + BETA-10A「下载→放行→装→可用」+ Scoop 装机路径，随下次上机）。
-- **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；Class B 仅剩 1 项：clarify options 结构口径（危险动作给不给「在访达显示/取消」、模糊查询给不给类型/动作 options，8 条，不阻塞出场线）。
+- **当前 task**：**BETA-14 出场报告骨架 + clarify options 方案 A + 老账收割 done**——[beta-exit.md](docs/reviews/beta-exit.md) 骨架落（parser-only 全填、真机格标 TODO）；clarify options 方案 A 拍板并落地（Class B 清零）；老账收割 9 条 → **v0.9 994/6/0（99.4%）、v0.5 495/5/0**，逐 case 零回归。前一轮：开源化整线 + v0.9.14 首个公开发版 done。
+- **下一步 top-3**：① 设计伙伴/首个真实部署主动获取（护城河 P0，开源免费降低试用门槛）；② 双平台真机复跑填 [beta-exit.md](docs/reviews/beta-exit.md) 的 TODO(真机) 格（子集命中率/索引资源占用/安装可用/性能 p95）；③ BETA-33 cycle 9 + v0.9.14 装机真机验证（六场景 + BETA-10A + Scoop，随下次上机）。
+- **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（clarify options 结构口径 2026-07-06 方案 A 拍板落地）。
 
 ## 当前 Task
 
-**2026-07-04 XI（最新）**：**开源免费定位落库**。用户拍板：不做 Class A 商业分发前置（Apple Developer / 证书 / 域名 / 商标），LociFind 走开源免费路线，**MIT OR Apache-2.0 双许可**。落地：LICENSE-MIT + LICENSE-APACHE 入库、Cargo workspace `license = "MIT OR Apache-2.0"`、desktop package.json 补 license 字段；PROJECT.md（核心原则 + 路线图 + 不做什么）、ROADMAP（§2/§4/§5/§6.3/§6.4/§7/§8/§11 + BETA-00/10/10A re-scope + V10-08 缩量 / V10-09 dropped）、README（简介 + License 章节）同步。**双平台真机 evals 与设计伙伴 P0 不受影响**（质量验证与商业分发无关）。开源前置新增两项检查归 BETA-00：Everything SDK 再分发条款、公开仓库脱敏。
-
-**前一轮 2026-07-04 IX+X**：两轮 partial 收割 + 四项口径拍板落地 + BETA-29 v2。**第一轮**（IX）：① 时间表达簇——before/after 绝对日期（年月无日 / 英文月名 / 混排 / 汉英数词月）+ 日期区间 + 措辞（这周/这个月/新增/做的/最近拍）+ created→created_desc 翻转收窄 + 标题词不作时间；② keywords 小刀——月份名/序数/数字词停用、「报告」sole-keep、「又」分隔、「预算表」compound、「比X还大」size、图片内容子句整尾短语、"the word" 消歧；标注离群对齐 3 条 → **952/48/0（95.2%）**。**第二轮**（X，用户四项拍板全按推荐落地）：复数归一（装配终点 + minutes/news 例外 + report sole-keep）、language 降出严格匹配（judge）、clarify question 核实为既定实现（剩 8 条是 options 结构差异另拍板）、ext-ft 标注对齐 6 条 + G15 谓词扩展（in the <kw> / 句首 documents 里 / 位置义 pictures 抑制）+「几百KB」启发 → **v0.9 = 977/23/0（97.7%）、v0.5 = 490/10/0**，全程逐 case 零回归（[复盘 §3.5](docs/reviews/beta-14-gap-inventory-2026-07-04.md)）。**BETA-29 v2**：`SavedSearch.intent`（向后兼容）+「保存草稿…」+ 带 ⚙ chip 重跑走 `search_with_intent`；新命令 `preview_intent`（只解析零执行）+ 搜索框 ⚙ / Shift+Enter 搜索前预览。
+**2026-07-06（最新）**：**BETA-14 出场报告骨架 + clarify options 方案 A + 老账收割**。① 起草 [beta-exit.md](docs/reviews/beta-exit.md)（§9 模板，parser-only 数据全填、真机相关格标 `TODO(真机)`，B→V checklist 必交付项）。② clarify options 结构口径（Class B 唯一剩余）拍板**方案 A**并就地落地（[决策备忘](docs/reviews/beta-14-clarify-options-decision-2026-07-06.md)）：evals 只校验 options 结构存在性（Array vs null），故按 reason 定「带不带」——非 Unknown 一律挂标准 options，parser（`clarify_with` + `standard_options`）与标注（d6/d8 共 17 条）双向对齐；v0.9 8 条 clarify partial 全清、Clarify 桶 67/0/0。③ 老账收割 9 条（songs by 小写连字符 artist ×4 / 碳中和 compound 占位符 / 裸 no+扩展名窄路径 / music 目录 mixed hint / 几个G→size_desc / d3 ft 对齐 ×2）。**结果：v0.9 977/23/0→994/6/0（99.4%）、v0.5 490/10/0→495/5/0**，逐 case 零回归；intent-parser 235 测 + evals/harness/server 全 gate + clippy/fmt 净。详录 [session-details-2026-07](docs/session-logs/session-details-2026-07.md)。
 
 ## 下一步
 
@@ -25,7 +23,7 @@
 3. **v0.9.14 发版 done**：CI 成功（run 28708792924，NSIS hook 首次真实构建通过）+ [Release](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.14) changelog 补全（prerelease）+ Scoop bucket [scoop-locifind](https://github.com/raoliaoyuan/scoop-locifind) 上线（`scoop bucket add locifind <url> && scoop install locifind`）。装机包供下一步 ② 真机验证。
 4. **BETA-10 剩余**：macOS DMG 产物 CI（下次触碰 macOS 侧时）；winget 待 BETA-14 后 / Homebrew tap 待 DMG CI。
 5. **BETA-40 真实内网证据**：唯一剩余验收项，依赖 ①。
-6. **剩余 23 条 partial**（不阻塞出场线，明细见[复盘 §3.5](docs/reviews/beta-14-gap-inventory-2026-07-04.md)）：clarify options 结构口径 8 条（待拍板，见「阻塞」）；v0.5 老账 10 条（hint 双语形态 / synthetic-artist ×4 / markdown ft 等，卡 §6.5 豁免额度、攒批处理）；零星 5 条（碳中和分词 / 保密协议 ft（d3 标注自身不一致）/ 备份文件 两难 / 裸 no / music 目录 hint 形态）。
+6. **剩余 6 条 partial**（不阻塞出场线，[beta-exit §3.4](docs/reviews/beta-exit.md)）：全为 v0.5 标注锁定项（markdown ft / 「上个月下载的」动词歧义 / 项目归档 location / downloads hint 双语 ×2，改标注吃 §6.5 豁免额度）+ 备份文件两难。parser 可确定性收割已见底。
 7. **BETA-29 v2 余量**：修正样本入 BETA-30 失败样本箱（依赖 BETA-30 开工，唯一剩余项）。
 8. **V10-16 主卡**（隐私 UI 集成 + 全量策略收口）：BETA-43 先导拆出后缩量，待 V 阶段。
 
@@ -34,11 +32,18 @@
 ## 阻塞 / 待用户决策
 
 - **Class A（外部条件，阻塞出场评测，不阻塞代码）**：仅剩 BETA-09(a)/MVP-26/28 双平台 evals——需 Windows 真机 + 完整 Spotlight 索引 macOS。~~Apple Developer / 证书 / 域名 / 商标~~ **已取消（2026-07-04 开源免费拍板**，分发改 GitHub Releases 开源口径，[ROADMAP §5](./ROADMAP.md)）。
-- **Class B（产品决策，不阻塞 §6 出场线）**：7-04 X 四项拍板已全部落地（复数归一 / language 降出 / clarify question 核实既定 / ext-ft 对齐，[复盘 §3.5](docs/reviews/beta-14-gap-inventory-2026-07-04.md)）。**仅剩 1 项**：**clarify options 结构口径**（8 条）——d6 危险动作 4 条：标注期望无 options、parser 给「在访达/资源管理器中显示 / 取消」；d8 模糊查询 4 条：标注期望类型/动作 options（如「文档/图片/视频/音乐」）、parser 不给。方向 = 统一「danger 类给安全出口 options、vague 类给消歧 options」并对齐标注，或维持现状。
+- **Class B（产品决策，不阻塞 §6 出场线）**：**已全部清零**——7-04 X 四项拍板 + 7-06 clarify options 结构口径（方案 A：按 reason 定带不带 options、非 Unknown 一律挂、parser/标注双向对齐，[决策备忘](docs/reviews/beta-14-clarify-options-decision-2026-07-06.md)）均落地。
 
 ## 会话日志
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
+
+### 2026-07-06 — Claude Code (Opus 4.8 / Fable 5) — BETA-14 出场报告骨架 + clarify options 方案 A + 老账收割至 99.4%
+
+**承接**：用户问「本次会话该做什么」→ 读三份共享文档 + 定向读 ROADMAP §2/§6.3/§8 → 判定质量线已达标、卡口全在真机/对外；用户选「先看 ROADMAP 全局再定」→ 按建议做出场报告骨架 + clarify 分析 → 拍板方案 A → 就地实现 → 续推老账收割。
+**产出**：① [beta-exit.md](docs/reviews/beta-exit.md) 骨架（§9 模板，parser-only 全填、真机格标 TODO，B→V checklist 必交付项）；② clarify options **方案 A** 拍板并落地（[决策备忘](docs/reviews/beta-14-clarify-options-decision-2026-07-06.md)）——按 reason 定带不带 options、非 Unknown 一律挂、parser（`clarify_with`+`standard_options`）与标注（d6/d8 共 17 条）双向对齐，Class B 清零；③ 老账收割 9 条（songs by 小写连字符 artist ×4 / 碳中和 compound 占位符保全 / 裸 no+字面扩展名窄路径 / music 目录 mixed hint / 几个G→size_desc / d3 ft 对齐 ×2）。
+**结果**：**v0.9 977/23/0→994/6/0（99.4%）、v0.5 490/10/0→495/5/0**，逐 case 零回归；intent-parser 230→235 测 + evals/harness/server 全 gate（28 suite 0 failed）+ clippy `-D warnings`/fmt 净。剩 6 partial 全为 v0.5 标注锁定项 + 备份文件两难，parser 收割见底。
+**未尽事宜**：真机复跑填 beta-exit TODO 格；clarify en query 返中文 options 是既有 i18n 缺口（独立小卡）。详录 → [session-details-2026-07.md](docs/session-logs/session-details-2026-07.md)。
 
 ### 2026-07-04 XI — Claude Code (Fable 5) — 开源免费定位落库（MIT OR Apache-2.0 双许可）
 
@@ -52,16 +57,3 @@
 **续 5（同日 BETA-10/10A 文档层 done）**：[install.md](docs/install.md)（SmartScreen 放行 + SHA256 校验 + 升级/卸载、Gatekeeper 三路径〔含 macOS 15 新口径〕+ ad-hoc、源码构建、可选模型）；[渠道评估](docs/reviews/beta-10-distribution-channels-2026-07-04.md)（Scoop 先行→winget 待稳定期→Homebrew tap 待 DMG CI）；README 安装节 + Release body 挂链。两卡转 in_progress，剩 DMG CI + 真机安装验证。
 **续 6（同日首个公开发版 done）**：bump v0.9.14（tauri.conf + Cargo.toml + lock `--locked` 验证）、tag 推公开 origin 触发 release-windows.yml（run 28708792924 **success**，NSIS 卸载 hook 首次真实构建通过、安装包 + sha256 出）；`gh release edit` 补 changelog（[草稿](docs/reviews/release-notes-v0.9.14-draft.md)，prerelease）；Scoop bucket **仓库 [scoop-locifind](https://github.com/raoliaoyuan/scoop-locifind) 建成上线**（manifest 填真 hash `4e525b…`、installer/uninstaller 脚本按实测 `%LOCALAPPDATA%\LociFind` 路径、autoupdate；远端 manifest JSON 校验有效）；种子入 [scripts/packaging/scoop/](scripts/packaging/scoop/README.md)。
 **未尽事宜**：v0.9.14 真机验证（cycle 9 + BETA-10A + Scoop 装机路径）随下次上机，归下一步 ②。
-
-### 2026-07-04 IX+X — Claude Code (Fable 5) — 两轮收割至 97.7% + 四项口径拍板落地 + BETA-29 v2
-
-**承接**：STATUS 下一步 ④⑤（用户选定三摊活）；第一轮后用户四项口径全按推荐拍板、当场落地。
-**第一轮产出**：① 时间簇（`parse_absolute_bounds` 九形态：年月日/年月 之前之后、英文月名、混排、汉英数词月、中英区间；`parse_year` 抢跑顺序 bug 修复；这周/这个月/最近拍/新增/做的；decide_sort created 翻转收窄〔相对时间+创建触发词〕；media 标题先抽再解时间）；② keywords（EN 月份名/序数/数字词/most 停用、报告 sole-keep、又 分隔、预算表 compound、比X还大 size、图片内容子句整尾短语、"the word" 消歧）；③ 标注离群对齐 3 条（各对 5:1+ 锚点多数派）→ 952/48/0。
-**第二轮产出（四项拍板）**：复数归一（`singularize_en_keyword` 装配终点做、不进 residual 抽取面〔fallback 遗漏分析复用该面，踩坑后重构〕、minutes/news/series 例外、report sole-keep）；language 降出严格匹配（`compare_json` 跳过，分语言统计不变，v0.5 +11）；clarify question 核实**既定实现**零变更（剩 8 条是 options 结构差异，另立拍板项）；ext-ft 对齐 6 条 + G15 谓词扩展（`in the <kw>`、句首「documents 里」闸门、位置义 pictures 不作 Image）+「几百KB」→<1MB 启发。
-**BETA-29 v2**：`SavedSearch.intent` + `save_search` intent 参（`validate_draft_intent` 闸门）+「保存草稿…」（与重跑共用 buildDraft）+ ⚙ chip 走 `search_with_intent`；新命令 `preview_intent`（parser+Refine、无模型、零 tool call）+ ⚙/Shift+Enter 预览入口。
-**结果**：**v0.9 = 977/23/0（97.7%）、v0.5 = 490/10/0**；四轮逐 case 对比全程零回归。intent-parser 230（+15）/ evals 全 gate（+1 judge 测）/ desktop 168（+3）全绿；clippy `-D warnings`/fmt/tsc/vite build 净。复盘追记：[gap-inventory §3.5](docs/reviews/beta-14-gap-inventory-2026-07-04.md)。
-**未尽事宜**：clarify options 结构口径 8 条（Class B 唯一剩余）；BETA-29 v2 剩 BETA-30 联动项；cycle 9 手测清单已补 v2 七场景。
-
-
-
-

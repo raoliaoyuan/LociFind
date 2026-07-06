@@ -236,7 +236,9 @@ pub const LOCATION_ALIASES: &[LocationAlias] = &[
         en_hint: "movies",
     },
     LocationAlias {
-        keywords: &["音乐目录", "music folder"],
+        // 「music 目录」：en 目录名 + 中文容器词的 mixed 形态（d5-mixed-010 锚），
+        // hint 形态由 common::alias_name_part_is_ascii 判定（名字部分 ascii → en_hint）。
+        keywords: &["音乐目录", "music 目录", "music folder"],
         zh_hint: "音乐",
         en_hint: "music",
     },

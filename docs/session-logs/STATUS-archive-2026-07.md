@@ -507,3 +507,12 @@ _BETA-31-v3 cycle 1-5（第 1-6 刀）+ 2026-06-29 v0.8.0 UX gap 第 1 刀 共 6
 **关键决策**：附件不单独成 documents 行（防磁盘上不存在的幽灵 path 搅乱增量回收/打开动作）；深度限 1 防嵌套邮件炸弹；`full_encoding` 开历史 charset（企业归档常见 GBK 邮件）。
 **踩坑**：PowerShell 双引号串里 `"$var?="` 的 `?` 被贪婪并入变量名（`$var?` 未定义 → 空），须 `${var}` 包裹——BETA-41 eml fixture 的 Subject 因此全空，本次修复。
 **未尽事宜**：email/attachment 桶命中率随 enterprise 向量 bootstrap（Mac）出报告；搜索侧 FileType 无 Email 概念（登记候选）。
+
+### 2026-07-04 IX+X — Claude Code (Fable 5) — 两轮收割至 97.7% + 四项口径拍板落地 + BETA-29 v2
+
+**承接**：STATUS 下一步 ④⑤（用户选定三摊活）；第一轮后用户四项口径全按推荐拍板、当场落地。
+**第一轮产出**：① 时间簇（`parse_absolute_bounds` 九形态：年月日/年月 之前之后、英文月名、混排、汉英数词月、中英区间；`parse_year` 抢跑顺序 bug 修复；这周/这个月/最近拍/新增/做的；decide_sort created 翻转收窄〔相对时间+创建触发词〕；media 标题先抽再解时间）；② keywords（EN 月份名/序数/数字词/most 停用、报告 sole-keep、又 分隔、预算表 compound、比X还大 size、图片内容子句整尾短语、"the word" 消歧）；③ 标注离群对齐 3 条（各对 5:1+ 锚点多数派）→ 952/48/0。
+**第二轮产出（四项拍板）**：复数归一（`singularize_en_keyword` 装配终点做、不进 residual 抽取面〔fallback 遗漏分析复用该面，踩坑后重构〕、minutes/news/series 例外、report sole-keep）；language 降出严格匹配（`compare_json` 跳过，分语言统计不变，v0.5 +11）；clarify question 核实**既定实现**零变更（剩 8 条是 options 结构差异，另立拍板项）；ext-ft 对齐 6 条 + G15 谓词扩展（`in the <kw>`、句首「documents 里」闸门、位置义 pictures 不作 Image）+「几百KB」→<1MB 启发。
+**BETA-29 v2**：`SavedSearch.intent` + `save_search` intent 参（`validate_draft_intent` 闸门）+「保存草稿…」（与重跑共用 buildDraft）+ ⚙ chip 走 `search_with_intent`；新命令 `preview_intent`（parser+Refine、无模型、零 tool call）+ ⚙/Shift+Enter 预览入口。
+**结果**：**v0.9 = 977/23/0（97.7%）、v0.5 = 490/10/0**；四轮逐 case 对比全程零回归。intent-parser 230（+15）/ evals 全 gate（+1 judge 测）/ desktop 168（+3）全绿；clippy `-D warnings`/fmt/tsc/vite build 净。复盘追记：[gap-inventory §3.5](docs/reviews/beta-14-gap-inventory-2026-07-04.md)。
+**未尽事宜**：clarify options 结构口径 8 条（Class B 唯一剩余）；BETA-29 v2 剩 BETA-30 联动项；cycle 9 手测清单已补 v2 七场景。

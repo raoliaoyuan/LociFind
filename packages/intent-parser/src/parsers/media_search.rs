@@ -344,6 +344,13 @@ fn has_size_desc_sort_word(lower: &str) -> bool {
         "largest",
         "体积最大",
         "大文件",
+        // 抽象 size 提及（「几个 G的视频」，v05-media-class1-size-074 锚）：与
+        // [`has_size_sort_signal`] 的四个抽象形态镜像——v0.5 media+size 锚点 26/26 全
+        // size_desc；「找几个视频」无单位词不命中（决策 E 路由不受影响）。
+        "几个 g",
+        "几个 m",
+        "几 g",
+        "几 m",
     ];
     SIZE_DESC_WORDS.iter().any(|w| lower.contains(w))
 }
@@ -1365,6 +1372,57 @@ mod tests_artist_natural_phrasing {
                 assert_eq!(m.artist, None, "{q} 不应抽 artist，得 {:?}", m.artist);
             }
         }
+    }
+
+    #[test]
+    fn songs_by_hyphenated_lowercase_artist() {
+        use locifind_search_backend::SearchIntent;
+        // v05-media-template-286 族：小写连字符 artist（合成语料形态）。
+        let SearchIntent::MediaSearch(m) = crate::parse("find songs by synthetic-artist") else {
+            panic!("应 media_search")
+        };
+        assert_eq!(m.artist.as_deref(), Some("synthetic-artist"));
+        // 反向守护：裸小写词（无连字符）不作 artist——"sorted by size" 类残句安全。
+        if let SearchIntent::MediaSearch(m) = crate::parse("videos sorted by size") {
+            assert_eq!(m.artist, None, "size 不应作 artist");
+        }
+    }
+
+    #[test]
+    fn abstract_size_mention_sorts_size_desc() {
+        use locifind_search_backend::{SearchIntent, SortOrder};
+        // v05-media-class1-size-074：「几个 G」抽象 size 提及 → size_desc（26 锚点惯例）。
+        let SearchIntent::MediaSearch(m) = crate::parse("找几个 G的视频") else {
+            panic!("应 media_search")
+        };
+        assert_eq!(m.sort, Some(SortOrder::SizeDesc));
+        // 反向守护：「找几个视频」无单位词 → 不触发 size 排序（决策 E 数量修饰路由不变）。
+        let SearchIntent::MediaSearch(m) = crate::parse("找几个视频") else {
+            panic!("应 media_search")
+        };
+        assert_ne!(m.sort, Some(SortOrder::SizeDesc));
+    }
+
+    #[test]
+    fn en_dir_name_with_zh_container_location_hint() {
+        use locifind_search_backend::SearchIntent;
+        // d5-mixed-010：「music 目录」= en 目录名 + 中文容器词，hint 取 en 形态。
+        let SearchIntent::MediaSearch(m) = crate::parse("music 目录里的 lossless 歌曲")
+        else {
+            panic!("应 media_search")
+        };
+        assert_eq!(
+            m.location.as_ref().and_then(|l| l.hint.as_deref()),
+            Some("music")
+        );
+        // 反向守护：纯中文「音乐目录」仍取 zh 形态 hint。
+        let SearchIntent::MediaSearch(m) = crate::parse("音乐目录里周杰伦的歌") else {
+            panic!("应 media_search")
+        };
+        assert_eq!(
+            m.location.as_ref().and_then(|l| l.hint.as_deref()),
+            Some("音乐")
+        );
     }
 
     #[test]

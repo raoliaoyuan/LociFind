@@ -76,11 +76,13 @@ fn extract_artist_by_structure(input: &str) -> Option<String> {
     }
 
     // BETA-13-G2：英文 "songs/tracks/music by X"（含 Fix2 (G) "music videos by X"）。
-    // X 为一到多个首字母大写的词（"Ed Sheeran" / "Taylor Swift" / "Coldplay" / "Adele"）。
+    // X 为一到多个首字母大写的词（"Ed Sheeran" / "Taylor Swift" / "Coldplay" / "Adele"），
+    // 或**含连字符的小写 ASCII 标识符**（"synthetic-artist"，v0.5 合成语料形态）——必须
+    // 含连字符，裸小写词（"sorted by size" 类残句的 size/name/year）不命中。
     static RE_EN_BY: OnceLock<Regex> = OnceLock::new();
     let re_en_by = RE_EN_BY.get_or_init(|| {
         Regex::new(
-            r"(?:songs?|tracks?|music|videos?)\s+by\s+([A-Z][A-Za-z]*(?:\s+[A-Z][A-Za-z]*)*)",
+            r"(?:songs?|tracks?|music|videos?)\s+by\s+([A-Z][A-Za-z]*(?:\s+[A-Z][A-Za-z]*)*|[a-z0-9_]+(?:-[a-z0-9_]+)+)",
         )
         .expect("regex")
     });

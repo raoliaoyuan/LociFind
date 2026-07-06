@@ -90,6 +90,10 @@ pub(crate) fn parse_file_search(input: &str, lower: &str, language: Language) ->
             }
         }
     }
+    // 裸「no <字面扩展名>」窄路径（无其它否定标记时兜底，d2-en-020）。
+    if neg.is_none() && exclude_extensions.is_none() {
+        exclude_extensions = bare_no_literal_extensions(lower);
+    }
 
     // BETA-13-G：扩展名 alias 未推出 file_type 时，用查询尾置类型名词兜底。
     // 该尾名词是「类型信号」而非内容，需同步从 keywords 里剥掉（否则
@@ -201,17 +205,54 @@ fn negated_literal_extensions(neg_lower: &str) -> Option<Vec<String>> {
     let mut out: Vec<String> = Vec::new();
     for raw in neg_lower.split(|c: char| !c.is_ascii_alphanumeric()) {
         let tok = raw.trim();
-        if tok.len() < 2 || !tok.chars().all(|c| c.is_ascii_alphanumeric()) {
-            continue;
+        if is_literal_extension_token(tok) && !out.iter().any(|e| e.eq_ignore_ascii_case(tok)) {
+            out.push(tok.to_ascii_lowercase());
         }
-        let is_literal_ext = lexicon::EXTENSION_ALIASES.iter().any(|a| {
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// 字面扩展名 token 判定（[`negated_literal_extensions`] 的谓词抽出，与
+/// [`bare_no_literal_extensions`] 共用）：≥2 字符纯 ascii 词，且命中某扩展名 alias 的
+/// keyword 并满足「本身是注册扩展名」或「媒体 alias 短词形（≤4 字符）」之一。
+fn is_literal_extension_token(tok: &str) -> bool {
+    tok.len() >= 2
+        && tok.chars().all(|c| c.is_ascii_alphanumeric())
+        && lexicon::EXTENSION_ALIASES.iter().any(|a| {
             a.keywords.iter().any(|k| k.eq_ignore_ascii_case(tok))
                 && (a.extensions.iter().any(|e| e.eq_ignore_ascii_case(tok))
                     || (a.extensions.is_empty() && tok.len() <= 4))
-        });
-        if is_literal_ext && !out.iter().any(|e| e.eq_ignore_ascii_case(tok)) {
-            out.push(tok.to_ascii_lowercase());
+        })
+}
+
+/// 裸「no <字面扩展名>」→ exclude_extensions（"videos and audio, no mkv"，d2-en-020 锚）。
+///
+/// 「no」**不入**通用否定标记 [`negation_split`]（语面太泛，会把整个后段送进
+/// exclude_file_type 机器）；本谓词只认「no + 紧邻单 token 且 token 是字面扩展名」，
+/// 类型词（"no screenshots"）不命中——那类由 but no / but not 标记路径处理。
+/// v0.5 全集无 `no <word>` 形态（0 条）→ byte-equal 安全。
+fn bare_no_literal_extensions(lower: &str) -> Option<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = lower;
+    while let Some(pos) = rest.find("no ") {
+        // 词边界：`no` 前必须是句首或非字母数字（避免 "piano mkv" 的 -no- 误命中）。
+        let ok_before = pos == 0 || !rest.as_bytes()[pos - 1].is_ascii_alphanumeric();
+        if ok_before {
+            let tok: String = rest[pos + 3..]
+                .trim_start()
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+            if is_literal_extension_token(&tok) && !out.iter().any(|e| e.eq_ignore_ascii_case(&tok))
+            {
+                out.push(tok.to_ascii_lowercase());
+            }
         }
+        rest = &rest[pos + 3..];
     }
     if out.is_empty() {
         None
@@ -1280,6 +1321,13 @@ pub(crate) const ZH_CONTAINER_NOUNS: &[&str] = &[
     "照片", "笔记", "收据", "海报",
 ];
 
+/// 词内含「和」的专有复合词——其中的「和」不是并列连词，切段前先占位保全
+/// （d3-zh-030「碳中和目标」锚；mirror「预算表」compound 词表制先例）。
+const ZH_HE_COMPOUNDS: &[&str] = &["碳中和"];
+
+/// 复合词保全占位符（私用区，不与任何真实输入冲突）。
+const HE_PLACEHOLDER: char = '\u{E000}';
+
 /// CJK 分隔符——切分关键词段（"的/了" 等结构助词不进关键词）。
 /// 「又」：并列连词（「既有发货又有签收」），d3-zh-032 锚；全集无「又」在内容词内的反例。
 fn is_zh_delimiter(c: char) -> bool {
@@ -1312,7 +1360,8 @@ fn strip_leading_bare_search_verb(s: &str) -> &str {
 /// 丢弃**整段恰为通用容器名词**的段（如「X的报告」→报告丢弃，但「体检报告」整段保留）。
 ///
 /// 已知边界（标注本身不一致，规则无法两全）：
-/// - 「碳中和目标」含「和」→ 不切「和」以保全（代价：「预算和审批流程」抽成一段）。
+/// - 「碳中和目标」含「和」→ 词表制保全（[`ZH_HE_COMPOUNDS`] 占位符方案，「和」仍是
+///   通用并列分隔符，「找合同和报告」不受影响）。
 /// - 「备份文件」标注期望「备份」，但「临时文件」期望保留「文件」→ 取「整段非容器即保留」，
 ///   故「临时文件」对、「备份文件」漏。
 fn extract_zh_residual_keywords(input: &str) -> Option<Vec<String>> {
@@ -1358,7 +1407,15 @@ fn extract_zh_residual_keywords(input: &str) -> Option<Vec<String>> {
         }
     }
 
-    // 2.5) BETA-13 回归修复：剥前导裸单字搜索动词「找/搜/查」（复合形式已在步骤 1 剥离），
+    // 2.5) 复合词保全（d3-zh-030 锚）：专有复合词（碳中和）内的「和」不是并列连词——
+    //      先换成私用区占位符，切段后还原；「找合同和报告」类真并列切分不受影响。
+    for w in ZH_HE_COMPOUNDS {
+        if s.contains(w) {
+            s = s.replace(w, &w.replace('和', &HE_PLACEHOLDER.to_string()));
+        }
+    }
+
+    // 2.6) BETA-13 回归修复：剥前导裸单字搜索动词「找/搜/查」（复合形式已在步骤 1 剥离），
     //      补「动词直接粘内容词」（找英语 / 找合同）这一漏网形态。
     let s = strip_leading_bare_search_verb(&s);
 
@@ -1367,13 +1424,20 @@ fn extract_zh_residual_keywords(input: &str) -> Option<Vec<String>> {
     let mut cur = String::new();
     let mut dropped_content_nouns: Vec<String> = Vec::new();
     for c in s.chars() {
-        if is_cjk(c) && !is_zh_delimiter(c) {
+        if (is_cjk(c) || c == HE_PLACEHOLDER) && !is_zh_delimiter(c) {
             cur.push(c);
         } else {
             push_residual_segment_tracking(&mut cur, &mut out, &mut dropped_content_nouns);
         }
     }
     push_residual_segment_tracking(&mut cur, &mut out, &mut dropped_content_nouns);
+
+    // 3.2) 还原复合词占位符（见 2.5）。
+    for k in &mut out {
+        if k.contains(HE_PLACEHOLDER) {
+            *k = k.replace(HE_PLACEHOLDER, "和");
+        }
+    }
 
     // 3.5) 半内容容器名词（报告）兜底：其它关键词都被剥空时它就是查询的内容本体
     //（「这周访问过的报告」→ [报告]；有并存内容词时仍丢弃：「关于市场调研的报告」→ [市场调研]）。
@@ -2404,6 +2468,43 @@ mod tests {
         };
         assert_eq!(fs.exclude_extensions, None);
         assert_eq!(fs.exclude_file_type, Some(vec![FileType::Video]));
+    }
+
+    #[test]
+    fn bare_no_literal_extension_goes_to_exclude_extensions() {
+        use locifind_search_backend::{FileType, SearchIntent};
+        // d2-en-020：裸「no mkv」（无 but not 等标记）→ exclude_extensions 窄路径。
+        let SearchIntent::FileSearch(fs) = crate::parse("videos and audio, no mkv") else {
+            panic!("应 file_search")
+        };
+        assert_eq!(fs.file_type, Some(vec![FileType::Video, FileType::Audio]));
+        assert_eq!(fs.exclude_extensions, Some(vec!["mkv".to_owned()]));
+        assert_eq!(fs.exclude_file_type, None);
+        // 反向守护：「no + 类型词」不命中窄路径（screenshots ≥5 字符非字面扩展名）。
+        let SearchIntent::FileSearch(fs) = crate::parse("music and videos, but no screenshots")
+        else {
+            panic!("应 file_search")
+        };
+        assert_eq!(fs.exclude_extensions, None);
+        assert_eq!(fs.exclude_file_type, Some(vec![FileType::Screenshot]));
+    }
+
+    #[test]
+    fn he_compound_keyword_preserved() {
+        use locifind_search_backend::{FileType, SearchIntent};
+        // d3-zh-030：「碳中和目标」词内「和」不作并列切分（占位符保全）。
+        let SearchIntent::FileSearch(fs) = crate::parse("正文提到碳中和目标的报告 pdf")
+        else {
+            panic!("应 file_search")
+        };
+        assert_eq!(fs.keywords, Some(vec!["碳中和目标".to_owned()]));
+        assert_eq!(fs.extensions, Some(vec!["pdf".to_owned()]));
+        assert_eq!(fs.file_type, Some(vec![FileType::Document]));
+        // 反向守护：真并列「和」仍切分（「找合同和报告」→ 合同；报告 是容器名词丢弃）。
+        let SearchIntent::FileSearch(fs) = crate::parse("找合同和报告") else {
+            panic!("应 file_search")
+        };
+        assert_eq!(fs.keywords, Some(vec!["合同".to_owned()]));
     }
 
     #[test]

@@ -8,7 +8,13 @@
       "schema_version": "1.0",
       "language": "zh",
       "reason": "ambiguous_time",
-      "question": "你想找最近的什么文件？能说下类型或内容吗？"
+      "question": "你想找最近的什么文件？能说下类型或内容吗？",
+      "options": [
+        "今天",
+        "过去 3 天",
+        "过去一周",
+        "过去一个月"
+      ]
     }
   },
   {
@@ -20,7 +26,13 @@
       "schema_version": "1.0",
       "language": "zh",
       "reason": "ambiguous_time",
-      "question": "前几天的哪个文件？方便说下大概是什么吗？"
+      "question": "前几天的哪个文件？方便说下大概是什么吗？",
+      "options": [
+        "今天",
+        "过去 3 天",
+        "过去一周",
+        "过去一个月"
+      ]
     }
   },
   {
@@ -32,7 +44,13 @@
       "schema_version": "1.0",
       "language": "zh",
       "reason": "ambiguous_type",
-      "question": "你想找昨天的什么类型的文件？"
+      "question": "你想找昨天的什么类型的文件？",
+      "options": [
+        "文档",
+        "图片",
+        "视频",
+        "音乐"
+      ]
     }
   },
   {
@@ -62,7 +80,14 @@
       "schema_version": "1.0",
       "language": "zh",
       "reason": "ambiguous_location",
-      "question": "哪个文件夹？能告诉我具体位置吗？"
+      "question": "哪个文件夹？能告诉我具体位置吗？",
+      "options": [
+        "全盘搜索",
+        "下载",
+        "文稿",
+        "桌面",
+        "取消"
+      ]
     }
   },
   {
@@ -104,7 +129,13 @@
       "schema_version": "1.0",
       "language": "zh",
       "reason": "ambiguous_time",
-      "question": "之前是大概什么时候？想找哪类文件？"
+      "question": "之前是大概什么时候？想找哪类文件？",
+      "options": [
+        "今天",
+        "过去 3 天",
+        "过去一周",
+        "过去一个月"
+      ]
     }
   },
   {
@@ -128,7 +159,13 @@
       "schema_version": "1.0",
       "language": "zh",
       "reason": "ambiguous_action",
-      "question": "你希望我怎么处理这个文件？"
+      "question": "你希望我怎么处理这个文件？",
+      "options": [
+        "打开",
+        "移动",
+        "删除",
+        "取消"
+      ]
     }
   },
   {
@@ -222,7 +259,13 @@
       "schema_version": "1.0",
       "language": "en",
       "reason": "ambiguous_type",
-      "question": "What kind of recent files are you looking for?"
+      "question": "What kind of recent files are you looking for?",
+      "options": [
+        "Documents",
+        "Images",
+        "Videos",
+        "Music"
+      ]
     }
   },
   {
@@ -234,7 +277,13 @@
       "schema_version": "1.0",
       "language": "en",
       "reason": "ambiguous_time",
-      "question": "Older than what? And what type of files do you mean?"
+      "question": "Older than what? And what type of files do you mean?",
+      "options": [
+        "Today",
+        "Past 3 days",
+        "Past week",
+        "Past month"
+      ]
     }
   },
   {
@@ -258,7 +307,14 @@
       "schema_version": "1.0",
       "language": "en",
       "reason": "ambiguous_location",
-      "question": "Which folder should I look in, and what are we searching for?"
+      "question": "Which folder should I look in, and what are we searching for?",
+      "options": [
+        "Whole disk",
+        "Downloads",
+        "Documents",
+        "Desktop",
+        "Cancel"
+      ]
     }
   },
   {
@@ -288,7 +344,13 @@
       "schema_version": "1.0",
       "language": "en",
       "reason": "ambiguous_type",
-      "question": "Which thing do you mean? What kind of file was it?"
+      "question": "Which thing do you mean? What kind of file was it?",
+      "options": [
+        "Documents",
+        "Images",
+        "Videos",
+        "Music"
+      ]
     }
   },
   {
@@ -312,7 +374,14 @@
       "schema_version": "1.0",
       "language": "en",
       "reason": "ambiguous_location",
-      "question": "Which folder are you referring to?"
+      "question": "Which folder are you referring to?",
+      "options": [
+        "Whole disk",
+        "Downloads",
+        "Documents",
+        "Desktop",
+        "Cancel"
+      ]
     }
   },
   {
@@ -386,7 +455,13 @@
       "schema_version": "1.0",
       "language": "mixed",
       "reason": "ambiguous_type",
-      "question": "你说的那个 file 是什么类型的呢？"
+      "question": "你说的那个 file 是什么类型的呢？",
+      "options": [
+        "文档",
+        "图片",
+        "视频",
+        "音乐"
+      ]
     }
   },
   {
@@ -398,7 +473,13 @@
       "schema_version": "1.0",
       "language": "mixed",
       "reason": "ambiguous_action",
-      "question": "你想对这些 documents 做什么操作？"
+      "question": "你想对这些 documents 做什么操作？",
+      "options": [
+        "打开",
+        "移动",
+        "删除",
+        "取消"
+      ]
     }
   },
   {

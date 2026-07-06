@@ -29,8 +29,10 @@ pub(crate) fn parse_location_with_language(lower: &str, language: Language) -> O
                 let hint = match language {
                     Language::En => a.en_hint,
                     Language::Mixed => {
-                        // v0.5：mixed 按实际命中 keyword 形式选 hint
-                        if k.is_ascii() {
+                        // v0.5：mixed 按实际命中 keyword 形式选 hint。
+                        // 「music 目录」类 en 名 + 中文容器词的混排 keyword，名字部分是
+                        // ascii → en_hint（d5-mixed-010 锚）；纯 ascii / 纯中文行为不变。
+                        if alias_name_part_is_ascii(k) {
                             a.en_hint
                         } else {
                             a.zh_hint
@@ -47,6 +49,19 @@ pub(crate) fn parse_location_with_language(lower: &str, language: Language) -> O
         }
     }
     None
+}
+
+/// mixed 查询的 hint 形态判定：命中的 alias keyword 剥去中文容器尾词（目录/文件夹/夹）
+/// 与空白后，名字部分为**非空纯 ASCII** → 用户用的是 en 目录名（「music 目录」→ music），
+/// 输 en_hint。纯 ASCII keyword（downloads）与纯中文 keyword（下载）行为与旧
+/// `k.is_ascii()` 判定完全一致，仅混排 keyword 走新分支。
+fn alias_name_part_is_ascii(k: &str) -> bool {
+    let name = k
+        .trim_end_matches("目录")
+        .trim_end_matches("文件夹")
+        .trim_end_matches('夹')
+        .trim();
+    !name.is_empty() && name.is_ascii()
 }
 
 /// 中文 location 关键词若是查询中某个**更长且实际存在**的类型关键词的子串

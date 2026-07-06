@@ -12313,6 +12313,7 @@
       "extensions": [
         "pdf"
       ],
+      "file_type": "document",
       "intent": "file_search",
       "keywords": [
         "碳中和目标"
@@ -12468,7 +12469,6 @@
     "query": "正文里出现保密协议四个字的文件",
     "language": "zh",
     "expected_intent": {
-      "file_type": "document",
       "intent": "file_search",
       "keywords": [
         "保密协议"
@@ -15603,6 +15603,10 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "zh",
+      "options": [
+        "在访达/资源管理器中显示",
+        "取消"
+      ],
       "question": "删除所有文件风险较高，你确定要删除当前结果里的全部文件吗？",
       "reason": "unsafe_action",
       "schema_version": "1.0"
@@ -15615,6 +15619,10 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "zh",
+      "options": [
+        "在访达/资源管理器中显示",
+        "取消"
+      ],
       "question": "这个操作范围太大也太危险，你具体想删除哪些文件？",
       "reason": "unsafe_action",
       "schema_version": "1.0"
@@ -15646,6 +15654,10 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "zh",
+      "options": [
+        "在访达/资源管理器中显示",
+        "取消"
+      ],
       "question": "你是想删除当前搜索结果里的全部文件吗？这个操作不可撤销。",
       "reason": "unsafe_action",
       "schema_version": "1.0"
@@ -16003,6 +16015,10 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "en",
+      "options": [
+        "Show in Finder / Explorer",
+        "Cancel"
+      ],
       "question": "That would delete a huge number of files and is irreversible. Which files do you actually want to delete?",
       "reason": "unsafe_action",
       "schema_version": "1.0"
@@ -16782,6 +16798,12 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "zh",
+      "options": [
+        "今天",
+        "过去 3 天",
+        "过去一周",
+        "过去一个月"
+      ],
       "question": "你想找最近的什么文件？能说下类型或内容吗？",
       "reason": "ambiguous_time",
       "schema_version": "1.0"
@@ -16794,6 +16816,12 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "zh",
+      "options": [
+        "今天",
+        "过去 3 天",
+        "过去一周",
+        "过去一个月"
+      ],
       "question": "前几天的哪个文件？方便说下大概是什么吗？",
       "reason": "ambiguous_time",
       "schema_version": "1.0"
@@ -16806,6 +16834,12 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "zh",
+      "options": [
+        "文档",
+        "图片",
+        "视频",
+        "音乐"
+      ],
       "question": "你想找昨天的什么类型的文件？",
       "reason": "ambiguous_type",
       "schema_version": "1.0"
@@ -16836,6 +16870,13 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "zh",
+      "options": [
+        "全盘搜索",
+        "下载",
+        "文稿",
+        "桌面",
+        "取消"
+      ],
       "question": "哪个文件夹？能告诉我具体位置吗？",
       "reason": "ambiguous_location",
       "schema_version": "1.0"
@@ -16878,6 +16919,12 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "zh",
+      "options": [
+        "今天",
+        "过去 3 天",
+        "过去一周",
+        "过去一个月"
+      ],
       "question": "之前是大概什么时候？想找哪类文件？",
       "reason": "ambiguous_time",
       "schema_version": "1.0"
@@ -16902,6 +16949,12 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "zh",
+      "options": [
+        "打开",
+        "移动",
+        "删除",
+        "取消"
+      ],
       "question": "你希望我怎么处理这个文件？",
       "reason": "ambiguous_action",
       "schema_version": "1.0"
@@ -16996,6 +17049,12 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "en",
+      "options": [
+        "Documents",
+        "Images",
+        "Videos",
+        "Music"
+      ],
       "question": "What kind of recent files are you looking for?",
       "reason": "ambiguous_type",
       "schema_version": "1.0"
@@ -17008,6 +17067,12 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "en",
+      "options": [
+        "Today",
+        "Past 3 days",
+        "Past week",
+        "Past month"
+      ],
       "question": "Older than what? And what type of files do you mean?",
       "reason": "ambiguous_time",
       "schema_version": "1.0"
@@ -17032,6 +17097,13 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "en",
+      "options": [
+        "Whole disk",
+        "Downloads",
+        "Documents",
+        "Desktop",
+        "Cancel"
+      ],
       "question": "Which folder should I look in, and what are we searching for?",
       "reason": "ambiguous_location",
       "schema_version": "1.0"
@@ -17062,6 +17134,12 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "en",
+      "options": [
+        "Documents",
+        "Images",
+        "Videos",
+        "Music"
+      ],
       "question": "Which thing do you mean? What kind of file was it?",
       "reason": "ambiguous_type",
       "schema_version": "1.0"
@@ -17086,6 +17164,13 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "en",
+      "options": [
+        "Whole disk",
+        "Downloads",
+        "Documents",
+        "Desktop",
+        "Cancel"
+      ],
       "question": "Which folder are you referring to?",
       "reason": "ambiguous_location",
       "schema_version": "1.0"
@@ -17160,6 +17245,12 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "mixed",
+      "options": [
+        "文档",
+        "图片",
+        "视频",
+        "音乐"
+      ],
       "question": "你说的那个 file 是什么类型的呢？",
       "reason": "ambiguous_type",
       "schema_version": "1.0"
@@ -17172,6 +17263,12 @@
     "expected_intent": {
       "intent": "clarify",
       "language": "mixed",
+      "options": [
+        "打开",
+        "移动",
+        "删除",
+        "取消"
+      ],
       "question": "你想对这些 documents 做什么操作？",
       "reason": "ambiguous_action",
       "schema_version": "1.0"
