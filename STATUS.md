@@ -18,7 +18,7 @@
 
 ## 下一步
 
-1. **BETA-53 真机验证**（S2/S3 code-done）：带 `semantic-recall` feature 构建桌面 app → 选项页「本机 MCP 服务」开关启用 → 复制配置片段进 Claude Code `~/.claude/settings.json` → 实连跑 `search` / `read_document` round-trip 验证语义命中 + 出处；核对只绑 127.0.0.1、token 鉴权、重置踢连接（[设计](docs/reviews/desktop-local-mcp-service-design.md)）。
+1. **BETA-53 真机验证**（S2/S3 code-done）：带 `semantic-recall` feature 构建桌面 app → 选项页「本机 MCP 服务」开关启用 → 复制配置片段进 Claude Code `~/.claude/settings.json` → 实连跑 `search` / `read_document` round-trip 验证语义命中 + 出处；核对只绑 127.0.0.1、token 鉴权、重置踢连接——照 [验证 playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)（[设计](docs/reviews/desktop-local-mcp-service-design.md)）。
 2. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
 3. **真机验证剩余项**（Windows 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)：BETA-47/50/51/52/29〔v1+v2〕/33〔单实例锁·设置流〕 + 基础搜索 + BETA-12 卸载·升级）——**Windows 仅剩**：BETA-49 音乐发现不越界（依赖目录配置）、BETA-43 出处/`read_document`/审计导出（[playbooks README](docs/playbooks/README.md) 第 8/9 条，需 daemon + 外部 LLM；**其中 `read_document` 正斜杠 root round-trip bug 本轮已修**）、BETA-33 cycle 9 WSearch 状态条 / 全库-概貌口径差；**macOS 整体待跑**（按 [manual-test-scenarios](docs/manual-test-scenarios.md)）。
 4. **发版进度**：**v0.9.18**（BETA-47/48/49/50）+ **v0.9.19**（BETA-51/52）双平台各 success、changelog 齐（[v0.9.19](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.19)）；并发机制累计稳。**Windows 首轮真机 6 项通过**（[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；macOS 真机待跑。
