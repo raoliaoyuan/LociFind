@@ -11,11 +11,17 @@
 
 /** embedding 模型状态（与后端 `EmbedStatus` serde 标签枚举对应）。 */
 export type EmbedStatus =
-  | { state: "ready" }
+  | { state: "ready"; active_path: string }
   | { state: "loading" }
   | { state: "not_found"; expected_path: string }
   | { state: "failed"; reason: string }
   | { state: "unavailable"; reason: string };
+
+/** 从绝对路径取文件名（跨平台，兼容 / 与 \ 分隔）。 */
+export function baseName(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
 
 /** 生成模型 fallback 状态（`get_model_status` 返回）：`detail` 为后端拼好的整句。 */
 export interface ModelStatusJson {
@@ -30,7 +36,10 @@ export interface ModelStatusJson {
 export function embedStatusLine(s: EmbedStatus): { text: string; color: string } {
   switch (s.state) {
     case "ready":
-      return { text: "语义召回：已就绪", color: "#34c759" };
+      return {
+        text: `语义召回：已就绪（当前模型：${baseName(s.active_path)}）`,
+        color: "#34c759",
+      };
     case "loading":
       return { text: "语义召回：模型加载中…", color: "#007aff" };
     case "not_found":

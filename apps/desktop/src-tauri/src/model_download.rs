@@ -441,6 +441,16 @@ fn es_find_files_named(_name: &str, _limit: usize) -> Vec<PathBuf> {
     Vec::new()
 }
 
+#[cfg(target_os = "windows")]
+fn es_find_files_ext(ext: &str, limit: usize) -> Vec<PathBuf> {
+    locifind_search_backend_everything::find_files_by_extension(ext, limit)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn es_find_files_ext(_ext: &str, _limit: usize) -> Vec<PathBuf> {
+    Vec::new()
+}
+
 #[derive(Clone, Serialize)]
 pub struct LocalModelCandidate {
     pub path: String,
@@ -508,6 +518,75 @@ pub fn discover_local_model(app: tauri::AppHandle, kind: String) -> Result<Disco
         candidates,
         everything_available,
     })
+}
+
+/// 自动发现的一个本机 gguf 模型候选（设置页「自动发现模型」列表项）。
+#[derive(Clone, Serialize)]
+pub struct GgufCandidate {
+    /// 绝对路径（选用后回填 embedding/generation 路径覆盖）。
+    pub path: String,
+    /// 文件名（列表展示 + 判断模型种类的线索）。
+    pub name: String,
+    /// 文件字节数。
+    pub size_bytes: u64,
+}
+
+/// [`discover_gguf_models`] 返回。
+#[derive(Clone, Serialize)]
+pub struct DiscoverGgufResult {
+    /// es.exe 是否可用（false 时前端提示「仅 Windows + Everything 支持自动发现，请手动填写路径」）。
+    pub everything_available: bool,
+    /// 全盘发现的 gguf 候选（按体积降序，大在前）。
+    pub candidates: Vec<GgufCandidate>,
+}
+
+/// 自动发现本机所有 gguf 模型文件（设置页「自动发现模型」按钮，2026-07-07）。
+///
+/// 与 [`discover_local_model`]（按 canonical 名找默认槽的同一模型）不同：本命令按
+/// **扩展名**全盘枚举**任意** gguf，供用户把语义 / 生成模型指向已有的更强本地模型
+/// 或局域网可信模型——**只回填路径覆盖、不复制不加载**（避免误载错架构模型 crash；
+/// 具体是否匹配该模型种类由用户判断 + 「检测」+ 应用后重启加载时验真）。
+///
+/// 经 Everything `ext:gguf` 全盘枚举（`enable_everything=false` 或非 Windows → 零候选）。
+#[tauri::command]
+pub fn discover_gguf_models(app: tauri::AppHandle) -> DiscoverGgufResult {
+    /// 发现列表体积下限：挡空/占位文件，比默认槽的 100MB 宽松以容纳较小的 embedding 模型。
+    const DISCOVER_MIN_BYTES: u64 = 8 * 1024 * 1024;
+    /// 候选上限（防超长列表）。
+    const LIMIT: usize = 60;
+
+    let everything_available =
+        crate::settings::read_enable_everything(&crate::settings::settings_file_path(&app))
+            && es_cli_available();
+    let mut candidates: Vec<GgufCandidate> = Vec::new();
+    if everything_available {
+        for p in es_find_files_ext("gguf", LIMIT) {
+            let key = p.to_string_lossy().to_lowercase();
+            if candidates.iter().any(|c| c.path.to_lowercase() == key) {
+                continue; // 去重
+            }
+            let Ok(meta) = std::fs::metadata(&p) else {
+                continue;
+            };
+            if meta.is_file() && meta.len() >= DISCOVER_MIN_BYTES {
+                let name = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                candidates.push(GgufCandidate {
+                    path: p.display().to_string(),
+                    name,
+                    size_bytes: meta.len(),
+                });
+            }
+        }
+        // 大在前——主力模型通常比 draft / 小语言模型大。
+        candidates.sort_by_key(|c| std::cmp::Reverse(c.size_bytes));
+    }
+    DiscoverGgufResult {
+        everything_available,
+        candidates,
+    }
 }
 
 /// 把发现的本机模型**复制**进默认目录（canonical 文件名）。

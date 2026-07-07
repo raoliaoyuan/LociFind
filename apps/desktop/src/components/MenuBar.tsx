@@ -212,12 +212,12 @@ export default function MenuBar() {
         {
           type: "item",
           label: "我的同义词...",
-          onClick: () => go("/synonyms"),
+          onClick: () => fire("open-prefs-misc"),
         },
         {
           type: "item",
           label: "隐私与数据...",
-          onClick: () => go("/privacy"),
+          onClick: () => fire("open-prefs-privacy"),
         },
         { type: "separator" },
         { type: "item", label: "模型 ▸", disabled: true },

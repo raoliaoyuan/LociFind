@@ -14,7 +14,9 @@ export type MenuAction =
   | "clear-history" // 搜索→清空搜索历史
   | "save-search" // 书签→保存当前搜索 / Ctrl+D
   | "open-prefs" // 工具→选项 / Ctrl+, ——打开模态选项卡片（替代旧 /settings 路由跳转）
-  | "open-prefs-indexing"; // 快速入门第 5 步→打开选项对话框并跳到「索引」分类
+  | "open-prefs-indexing" // 快速入门第 5 步→打开选项对话框并跳到「索引」分类
+  | "open-prefs-misc" // 工具→我的同义词→打开选项对话框并跳到「杂项」分类（2026-07-07 整页收编）
+  | "open-prefs-privacy"; // 工具→隐私与数据→打开选项对话框并跳到「隐私与记录」分类（2026-07-07 整页收编）
 
 const CHANNEL = "locifind:menu";
 

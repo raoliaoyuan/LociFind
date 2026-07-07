@@ -9,13 +9,12 @@ import { useShouldShowOnboarding } from "./hooks/useShouldShowOnboarding";
 import { onMenuAction } from "./lib/menu-events";
 import OnboardingMac from "./pages/OnboardingMac";
 import OnboardingWin from "./pages/OnboardingWin";
-import PrivacyPage from "./pages/PrivacyPage";
-import UserSynonymsPage from "./pages/UserSynonymsPage";
 
 // MVP-19/20/21/22/23/24 集成：
 // - / → 搜索主视图
-// - /privacy → 隐私（设置走模态 PreferencesDialog；旧 /settings 路由已随
-//   BETA-33 cycle 9 删除——cycle 3 起无任何导航入口，仅剩路由注册本身）
+// - 设置 / 同义词 / 隐私一律走模态 PreferencesDialog（2026-07-07 起「我的同义词」
+//   「隐私与数据」两独立整页收编进选项对话框 tab——整页无返回入口，旧 /settings
+//   路由早于 BETA-33 cycle 9 删除，本次一并去掉 /synonyms 与 /privacy 路由）
 // - /onboarding/mac /onboarding/win → 首次启动权限引导
 // - 启动时根据 OS 自动跳转到对应 onboarding（已完成的不再跳）
 function App() {
@@ -23,13 +22,15 @@ function App() {
   const location = useLocation();
   const onboarding = useShouldShowOnboarding();
   const [showPrefs, setShowPrefs] = useState(false);
-  // 快速入门第 5 步「配置索引目录」直接打开选项对话框时用；null = 用默认「常规」。
+  // 打开选项对话框时默认选中的分类；null = 用默认「常规」。
+  // 快速入门第 5 步走「索引」；工具菜单「我的同义词 / 隐私与数据」走「杂项 / 隐私与记录」。
   const [prefsInitialCategory, setPrefsInitialCategory] = useState<
-    "general" | "semantic" | "indexing" | "privacy" | null
+    "general" | "semantic" | "indexing" | "privacy" | "misc" | null
   >(null);
 
   // BETA-33 cycle 3：监听菜单事件 `open-prefs`、打开模态选项对话框（替代旧 navigate("/settings")）。
   // 快速入门追加：`open-prefs-indexing` 打开对话框并直接切到「索引」分类。
+  // 2026-07-07：`open-prefs-misc`/`open-prefs-privacy` 承接原 /synonyms、/privacy 整页入口。
   useEffect(
     () =>
       onMenuAction((a) => {
@@ -38,6 +39,12 @@ function App() {
           setShowPrefs(true);
         } else if (a === "open-prefs-indexing") {
           setPrefsInitialCategory("indexing");
+          setShowPrefs(true);
+        } else if (a === "open-prefs-misc") {
+          setPrefsInitialCategory("misc");
+          setShowPrefs(true);
+        } else if (a === "open-prefs-privacy") {
+          setPrefsInitialCategory("privacy");
           setShowPrefs(true);
         }
       }),
@@ -76,8 +83,6 @@ function App() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<SearchView />} />
-          <Route path="/privacy" element={<PrivacyPage />} />
-          <Route path="/synonyms" element={<UserSynonymsPage />} />
           <Route path="/onboarding/mac" element={<OnboardingMac />} />
           <Route path="/onboarding/win" element={<OnboardingWin />} />
         </Routes>

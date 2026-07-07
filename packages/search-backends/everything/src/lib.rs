@@ -961,6 +961,43 @@ pub fn find_files_named(_filename: &str, _limit: usize) -> Vec<PathBuf> {
     Vec::new()
 }
 
+/// 2026-07-07（设置页自动发现模型）：按**扩展名**全盘查找文件（`ext:<ext>`）。
+///
+/// 与 [`find_files_named`] 同款 es.exe 定位 + UTF-8 导出解码；用于「自动发现本机 gguf
+/// 模型」——列出候选交用户选用为语义 / 生成模型路径覆盖（不加载、不复制）。`ext`
+/// 传裸扩展名（如 `gguf`，不含点）。es.exe 不可用 / 失败 / 非 Windows → 返回空。
+#[cfg(target_os = "windows")]
+#[must_use]
+pub fn find_files_by_extension(ext: &str, limit: usize) -> Vec<PathBuf> {
+    let program = resolve_es_path();
+    if !executable_exists(&program) {
+        return Vec::new();
+    }
+    let command = EverythingCommand {
+        program,
+        args: vec!["-n".to_owned(), limit.to_string(), format!("ext:{ext}")],
+        exclude_paths: Vec::new(),
+        limit,
+    };
+    let cancel = CancellationToken::new();
+    match run_es_cli(&command, &cancel) {
+        Ok(text) => text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(PathBuf::from)
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// 非 Windows 平台：Everything 不可用，恒返回空。
+#[cfg(not(target_os = "windows"))]
+#[must_use]
+pub fn find_files_by_extension(_ext: &str, _limit: usize) -> Vec<PathBuf> {
+    Vec::new()
+}
+
 /// es.exe 是否可用（两段式定位命中任一候选）。调用方据此区分
 /// [`find_files_named`] 返回空是"没找到"还是"Everything 不可用"。
 #[cfg(target_os = "windows")]

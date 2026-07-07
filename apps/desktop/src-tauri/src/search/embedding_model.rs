@@ -52,8 +52,11 @@ enum EmbedState {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum EmbedStatus {
-    /// 已加载就绪。
-    Ready,
+    /// 已加载就绪（含当前生效的模型文件路径，供设置页显示"用的是哪个模型"）。
+    Ready {
+        /// 当前生效模型文件的绝对路径（settings 覆盖优先，否则默认 models/ 路径）。
+        active_path: String,
+    },
     /// 加载中（某调用者正在阻塞 load）。
     Loading,
     /// 未找到模型文件（含期望放置路径）。
@@ -232,14 +235,18 @@ impl EmbeddingModelHandle {
     pub fn status(&self) -> EmbedStatus {
         let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         match &*st {
-            EmbedState::Ready(_) => EmbedStatus::Ready,
+            EmbedState::Ready(_) => EmbedStatus::Ready {
+                active_path: self.resolved_model_path().to_string_lossy().into_owned(),
+            },
             EmbedState::Loading => EmbedStatus::Loading,
             EmbedState::Failed(r) => EmbedStatus::Failed { reason: r.clone() },
             EmbedState::Unavailable(r) => EmbedStatus::Unavailable { reason: r.clone() },
             EmbedState::NotLoaded => {
                 let path = self.resolved_model_path();
                 if path.exists() {
-                    EmbedStatus::Ready
+                    EmbedStatus::Ready {
+                        active_path: path.to_string_lossy().into_owned(),
+                    }
                 } else {
                     EmbedStatus::NotFound {
                         expected_path: path.to_string_lossy().into_owned(),

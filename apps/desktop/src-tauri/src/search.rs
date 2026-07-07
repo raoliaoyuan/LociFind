@@ -860,6 +860,72 @@ pub async fn embedding_model_status(
     Ok(deps.embedding().status())
 }
 
+/// 设置页「检测」按钮的返回：给定模型文件路径是否可用。
+///
+/// 纯文件系统检查（不加载模型、不触发推理）：存在性 + 后缀 + 体积下限。
+/// 为把语义 / 生成模型指向更强的本地模型或局域网可信模型路径提供"落地前"的
+/// 可用性反馈——用户填好自定义路径即可先检测、再应用生效。
+#[derive(Debug, serde::Serialize)]
+pub struct ModelProbe {
+    /// 实际检测的路径（空输入回显为空串，由前端提示"使用默认位置"）。
+    pub path: String,
+    /// 路径存在且是文件。
+    pub exists: bool,
+    /// 文件字节数（不存在为 0）。
+    pub size_bytes: u64,
+    /// 后缀是 gguf（大小写不敏感）。
+    pub is_gguf: bool,
+    /// 综合判定：存在 + gguf 后缀 + 体积达下限。
+    pub usable: bool,
+    /// 人话结论（前端直接展示）。
+    pub message: String,
+}
+
+/// 检测指定路径的模型文件是否可用（设置页「检测」按钮，2026-07-07）。
+#[tauri::command]
+pub fn probe_model_file(path: String) -> ModelProbe {
+    /// 体积下限：挡住空文件 / 占位文件（真实 gguf 均在数十 MB 以上）。
+    const MIN_BYTES: u64 = 1024 * 1024;
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return ModelProbe {
+            path: String::new(),
+            exists: false,
+            size_bytes: 0,
+            is_gguf: false,
+            usable: false,
+            message: "未指定路径，将使用默认模型位置".to_owned(),
+        };
+    }
+    let p = std::path::Path::new(trimmed);
+    let is_gguf = p
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("gguf"));
+    let meta = std::fs::metadata(p).ok();
+    let exists = meta.as_ref().is_some_and(std::fs::Metadata::is_file);
+    let size_bytes = meta.as_ref().map_or(0, std::fs::Metadata::len);
+    let usable = exists && is_gguf && size_bytes >= MIN_BYTES;
+    let message = if !exists {
+        "文件不存在或不可访问".to_owned()
+    } else if !is_gguf {
+        "文件存在，但后缀不是 gguf（可能不是模型文件）".to_owned()
+    } else if size_bytes < MIN_BYTES {
+        format!("文件过小（{size_bytes} 字节），可能不是完整模型")
+    } else {
+        // 整数算 MB（保留一位小数），避开 f64 转换的精度损失 lint。
+        let tenths = size_bytes * 10 / MIN_BYTES;
+        format!("可用 · {}.{} MB", tenths / 10, tenths % 10)
+    };
+    ModelProbe {
+        path: trimmed.to_owned(),
+        exists,
+        size_bytes,
+        is_gguf,
+        usable,
+        message,
+    }
+}
+
 /// 打开指定路径的文件(UI 双击行)。
 #[tauri::command]
 pub async fn open_path(

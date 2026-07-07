@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useNavigate } from "react-router-dom";
 // BETA-33 cycle 9：EmbedStatus / ModelStatusJson 类型 + embedStatusLine 文案改从
 // 单一信源引入（原与 SettingsPage / StatusIndicator 三处复制，详见 lib/model-status.ts）。
 import { EmbedStatus, ModelStatusJson } from "../lib/model-status";
@@ -46,7 +45,6 @@ export default function PreferencesDialog({
   initialCategory,
 }: Props) {
   const [active, setActive] = useState<Category>(initialCategory ?? "general");
-  const navigate = useNavigate();
   // cycle 9：settings 加载/编辑/保存流（含 initialSettings 快照 + 未保存判定）收拢进 hook。
   const {
     settings,
@@ -210,29 +208,6 @@ export default function PreferencesDialog({
       return;
     }
     onClose();
-  };
-
-  // BETA-47：面板内「打开 XX 页」跳转——与关闭同守卫（未保存改动先确认），
-  // 确认/无改动后关对话框再 navigate。
-  const handleNavigate = (path: string) => {
-    const go = () => {
-      onClose();
-      navigate(path);
-    };
-    if (hasUnsavedChanges) {
-      setConfirmReq({
-        title: "放弃未保存的改动？",
-        message: "你有未保存的改动，离开选项对话框将放弃这些改动。",
-        confirmLabel: "放弃改动并离开",
-        danger: true,
-        onConfirm: () => {
-          setConfirmReq(null);
-          go();
-        },
-      });
-      return;
-    }
-    go();
   };
 
   // Esc 关闭：走 React onKeyDown 事件冒泡 + dialog root 自动获焦。
@@ -473,7 +448,7 @@ export default function PreferencesDialog({
             ) : active === "windows" ? (
               <WindowsPane />
             ) : active === "misc" ? (
-              <MiscPane onNavigate={handleNavigate} />
+              <MiscPane />
             ) : active === "indexing" ? (
               <IndexingPane
                 settings={settings}
@@ -524,7 +499,6 @@ export default function PreferencesDialog({
                     .catch(console.error)
                 }
                 onClear={handleClearAuditLog}
-                onNavigate={handleNavigate}
               />
             )}
           </div>
