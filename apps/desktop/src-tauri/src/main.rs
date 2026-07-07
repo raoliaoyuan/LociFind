@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod history;
+mod mcp_service;
 mod model_download;
 mod permissions;
 mod privacy;
@@ -581,6 +582,30 @@ fn main() {
                 Arc::clone(&user_index),
                 user_synonyms_path,
             ));
+            // BETA-53：本机 MCP 服务 managed 状态——复用桌面 embedding 句柄 + index.db 目录，
+            // 起停由工具菜单 / 选项页开关驱动。以 Arc 交给 manage，便于自动启动任务共享同一实例。
+            let mcp_state = Arc::new(mcp_service::McpServiceState::new(
+                embedding.clone(),
+                locifind_data_dir(),
+                settings::settings_file_path(&app.handle().clone()),
+            ));
+            // 上次会话开着 → 本次启动自动拉起（非阻塞，失败仅告警不影响主功能）。
+            let mcp_autostart = {
+                let enabled = settings::read_settings_or_default(&settings::settings_file_path(
+                    &app.handle().clone(),
+                ))
+                .mcp_service_enabled;
+                enabled.then(|| mcp_state.clone())
+            };
+            app.manage(mcp_state);
+            if let Some(svc) = mcp_autostart {
+                tauri::async_runtime::spawn(async move {
+                    match svc.start().await {
+                        Ok(_) => info!("本机 MCP 服务已按上次开关态自动启动"),
+                        Err(e) => warn!(error = %e, "本机 MCP 服务自动启动失败（不影响搜索主功能）"),
+                    }
+                });
+            }
             // BETA-07：启动后台自动索引（非阻塞，UI 立即可用）；incremental 后续启动秒级。
             tauri::async_runtime::spawn(async move {
                 info!("启动后台 FTS reindex（spawn_blocking）");
@@ -686,6 +711,10 @@ fn main() {
             user_synonyms::delete_user_synonym,
             user_synonyms::export_user_synonyms,
             user_synonyms::import_user_synonyms,
+            mcp_service::start_mcp_service,
+            mcp_service::stop_mcp_service,
+            mcp_service::mcp_service_status,
+            mcp_service::reset_mcp_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

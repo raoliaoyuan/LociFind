@@ -1,0 +1,244 @@
+import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+
+/** 后端 `McpServiceStatus`（apps/desktop/src-tauri/src/mcp_service.rs，serde snake_case）。 */
+interface McpServiceStatus {
+  running: boolean;
+  enabled: boolean;
+  address: string;
+  url: string;
+  token: string | null;
+  doc_count: number | null;
+  semantic: boolean | null;
+}
+
+/** 生成 Claude Code / Codex 的 `mcpServers` 接入片段（照 apps/daemon/README §4）。 */
+function configSnippet(url: string, token: string): string {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        "locifind-local": {
+          type: "http",
+          url,
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      },
+    },
+    null,
+    2,
+  );
+}
+
+/**
+ * BETA-53：「本机 MCP 服务」面板（跨平台）。
+ *
+ * 一个开关把桌面已建的本机索引经 MCP 暴露给**本机** LLM 客户端（Claude Code / Codex）——
+ * 内嵌复用桌面检索栈、只读挂载桌面 index.db（零重索引、语义白送），只绑 `127.0.0.1` + token。
+ * 起停 / 重置令牌 / 状态全走后端命令（start/stop_mcp_service、reset_mcp_token、mcp_service_status），
+ * 不经 AppSettings 表单——token 与开关态由后端直接持久化到 settings.json。
+ */
+export function McpPane() {
+  const [status, setStatus] = useState<McpServiceStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<"token" | "config" | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await invoke<McpServiceStatus>("mcp_service_status"));
+    } catch (err) {
+      console.error("[McpPane] mcp_service_status failed:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    // 运行态可能被自动启动 / 其他窗口改变，轻量轮询保持状态新鲜。
+    const t = setInterval(() => void refresh(), 3000);
+    return () => clearInterval(t);
+  }, [refresh]);
+
+  const toggle = async (enable: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await invoke<McpServiceStatus>(
+        enable ? "start_mcp_service" : "stop_mcp_service",
+      );
+      setStatus(next);
+    } catch (err) {
+      console.error("[McpPane] toggle failed:", err);
+      setError(String(err));
+      // 失败后拉一次真实状态（可能部分成功）。
+      void refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resetToken = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await invoke<McpServiceStatus>("reset_mcp_token"));
+    } catch (err) {
+      console.error("[McpPane] reset_mcp_token failed:", err);
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async (text: string, which: "token" | "config") => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(which);
+      setTimeout(() => setCopied(null), 1500);
+    } catch (err) {
+      console.error("[McpPane] clipboard write failed:", err);
+    }
+  };
+
+  const running = status?.running ?? false;
+  const token = status?.token ?? null;
+
+  return (
+    <div className="prefs-form">
+      <div className="prefs-field">
+        <label className="prefs-label">本机 MCP 服务</label>
+        <p className="prefs-hint">
+          启用后，本机的 Claude Code / Codex 等 LLM 客户端可通过 MCP 协议
+          <strong>用自然语言检索、并读取你电脑里已被 LociFind 索引的文件</strong>
+          ——复用桌面已建的语义 + 全文索引，无需另起服务、无需手写配置。
+          服务只监听本机回环地址（<code>127.0.0.1</code>），不对局域网开放。
+        </p>
+      </div>
+
+      <div className="prefs-field">
+        <label className="prefs-checkbox prefs-checkbox-strong">
+          <input
+            type="checkbox"
+            checked={running}
+            disabled={busy}
+            onChange={(e) => void toggle(e.target.checked)}
+          />
+          <strong>{running ? "已启用（正在运行）" : "启用本机 MCP 服务"}</strong>
+        </label>
+        {status && (
+          <p
+            className="prefs-status"
+            style={{ color: running ? "#0a7a3b" : "#666" }}
+          >
+            {busy
+              ? "处理中…"
+              : running
+                ? `✓ 运行中 · 监听 ${status.address}` +
+                  (status.doc_count != null
+                    ? ` · 已挂载 ${status.doc_count} 条索引`
+                    : "") +
+                  (status.semantic === false
+                    ? " · 仅全文（未启用语义召回）"
+                    : status.semantic === true
+                      ? " · 含语义召回"
+                      : "")
+                : "已停止"}
+          </p>
+        )}
+        {error && (
+          <p className="prefs-status" style={{ color: "#b3261e" }}>
+            ⚠ 操作失败：{error}
+          </p>
+        )}
+      </div>
+
+      {token && (
+        <>
+          <div className="prefs-field">
+            <label className="prefs-label">访问令牌（Bearer token）</label>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <code
+                style={{
+                  flex: 1,
+                  padding: "6px 10px",
+                  borderRadius: "5px",
+                  backgroundColor: "#1e1e1e",
+                  color: "#e6e6e6",
+                  fontSize: "12.5px",
+                  wordBreak: "break-all",
+                }}
+              >
+                {token}
+              </code>
+              <button
+                type="button"
+                className="prefs-btn small"
+                onClick={() => void copy(token, "token")}
+              >
+                {copied === "token" ? "已复制" : "复制"}
+              </button>
+            </div>
+            <div style={{ marginTop: "8px" }}>
+              <button
+                type="button"
+                className="prefs-btn small"
+                onClick={() => void resetToken()}
+                disabled={busy}
+              >
+                重置令牌
+              </button>
+              <span className="prefs-hint" style={{ marginLeft: "10px" }}>
+                重置会停止服务并作废旧令牌（踢掉已连接的客户端），需重新启用。
+              </span>
+            </div>
+          </div>
+
+          <div className="prefs-field">
+            <label className="prefs-label">
+              Claude Code / Codex 接入配置
+            </label>
+            <p className="prefs-hint">
+              把下面这段加进客户端的 MCP 配置（Claude Code：
+              <code>~/.claude/settings.json</code>），即可用 <code>search</code> /
+              <code>read_document</code> 工具检索本机文件：
+            </p>
+            <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
+              <pre
+                style={{
+                  flex: 1,
+                  margin: 0,
+                  padding: "8px 10px",
+                  borderRadius: "5px",
+                  backgroundColor: "#1e1e1e",
+                  color: "#e6e6e6",
+                  fontSize: "12px",
+                  overflowX: "auto",
+                }}
+              >
+                {configSnippet(status?.url ?? "", token)}
+              </pre>
+              <button
+                type="button"
+                className="prefs-btn small"
+                onClick={() =>
+                  void copy(configSnippet(status?.url ?? "", token), "config")
+                }
+              >
+                {copied === "config" ? "已复制" : "复制"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="prefs-field">
+        <label className="prefs-label">安全提示</label>
+        <p className="prefs-hint" style={{ color: "#8a5a00" }}>
+          ⚠ 启用即表示：<strong>本机上任何拿到该令牌的程序</strong>都能通过此服务
+          搜索并读取被 LociFind 索引的文件内容。服务只绑 <code>127.0.0.1</code>、
+          不对外网 / 局域网开放，令牌保存在本机 settings.json。若怀疑令牌泄露，
+          请点「重置令牌」。不用时建议关闭。
+        </p>
+      </div>
+    </div>
+  );
+}

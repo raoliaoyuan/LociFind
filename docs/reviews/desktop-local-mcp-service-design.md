@@ -1,7 +1,9 @@
 # 设计：桌面 App「本机 MCP 检索服务」开关（BETA-32 桌面变体）
 
-> 状态：设计提案（2026-07-07，Claude Code）。待用户拍板范围后登 ROADMAP 实施。
+> 状态：**S1-S3 code-done**（2026-07-07 V，Claude Code）。BETA-53；离线验证全绿，剩真机验证（带 semantic-recall 构建 + Claude Code 实连 round-trip）。
 > 触发：用户想让 Claude Code 这类 agent 方便地经 MCP 检索本机个人索引、查本机文件。
+>
+> **实施落点**：内嵌 `packages/locifind-server`（`DaemonConfigFile::personal_local` + `app::serve_bound`）；桌面 `apps/desktop/src-tauri/src/mcp_service.rs`（`McpServiceState` + `start/stop_mcp_service`/`mcp_service_status`/`reset_mcp_token` 四命令 + 自启）；前端 `preferences/McpPane.tsx`（开关 / token 复制 / 配置片段 / 重置 / 安全提示）。端口 8766、只绑 `127.0.0.1`、随机 64-hex token、只读挂载桌面 index.db（零重索引）。
 
 ## 1. 目标与非目标
 

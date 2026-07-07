@@ -193,6 +193,37 @@ impl DaemonConfigFile {
         }
     }
 
+    /// 桌面「本机 MCP 服务」变体（BETA-53）：把桌面已建的本机索引经 MCP 暴露给
+    /// 本机 LLM 客户端。与 [`Self::legacy_single_root`] 同为单 `default` 集合 + 全权
+    /// admin token，区别是**支持多 root**——桌面通常索引多个目录（自定义 + 系统默认
+    /// 三夹），逐一归一分隔符后放进同一集合的 roots，让 `list_collections` 如实反映
+    /// 索引范围。`allow_full_read=true`：自己的文件、自己的 agent，默认放开全文
+    /// （设计 `docs/reviews/desktop-local-mcp-service-design.md` §5.4）。
+    ///
+    /// roots 仅供 `list_collections` 展示与 audit 留痕——读取面由索引 db 边界天然约束
+    /// （`read_document` 内容取自索引、不触磁盘，roots 之外的文件不在库里即不可达）。
+    #[must_use]
+    pub fn personal_local(roots: Vec<PathBuf>, token: SecretString) -> Self {
+        Self {
+            collections: vec![CollectionConfig {
+                id: LEGACY_COLLECTION_ID.to_string(),
+                display_name: Some("本机文件".to_string()),
+                subject_kind: SubjectKind::Other,
+                roots: roots.into_iter().map(normalize_root).collect(),
+                read_only: false,
+                audit_tags: Vec::new(),
+                allow_full_read: true,
+            }],
+            tokens: vec![TokenConfig {
+                token,
+                subject: "local".to_string(),
+                collections: vec!["*".to_string()],
+                admin: true,
+            }],
+            audit: AuditConfig::default(),
+        }
+    }
+
     /// 按 id 查 collection。
     #[must_use]
     pub fn collection(&self, id: &str) -> Option<&CollectionConfig> {
@@ -446,6 +477,37 @@ log_query = false
         assert_eq!(stored, r"C:\data\archive");
         #[cfg(not(windows))]
         assert_eq!(stored, "C:/data/archive");
+    }
+
+    /// BETA-53 桌面变体：多 root 全部逐一归一分隔符入同一 default 集合、
+    /// 全权 admin token、`allow_full_read=true`（个人单库姿态）。
+    #[test]
+    fn personal_local_multi_root_normalized_and_full_read() {
+        let cfg = DaemonConfigFile::personal_local(
+            vec![
+                PathBuf::from("C:/Users/x/Documents"),
+                PathBuf::from("D:/media/photos"),
+            ],
+            SecretString::from(TOKEN_A.to_string()),
+        );
+        assert_eq!(cfg.collections.len(), 1);
+        let c = &cfg.collections[0];
+        assert_eq!(c.id, LEGACY_COLLECTION_ID);
+        assert_eq!(c.roots.len(), 2, "两个 root 都应保留");
+        assert!(c.allow_full_read, "个人单库默认放开全文");
+        assert!(!c.read_only);
+        #[cfg(windows)]
+        {
+            assert_eq!(c.roots[0].to_string_lossy(), r"C:\Users\x\Documents");
+            assert_eq!(c.roots[1].to_string_lossy(), r"D:\media\photos");
+        }
+        assert_eq!(cfg.tokens.len(), 1);
+        assert!(cfg.tokens[0].admin, "个人变体单钥全权");
+        assert_eq!(
+            CollectionGrant::from_patterns(&cfg.tokens[0].collections),
+            CollectionGrant::All
+        );
+        assert!(cfg.audit.log_query, "个人变体 audit 缺省开");
     }
 
     #[test]

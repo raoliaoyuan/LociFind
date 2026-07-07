@@ -9,7 +9,8 @@ export type Category =
   | "semantic"
   | "windows"
   | "privacy"
-  | "misc";
+  | "misc"
+  | "mcp";
 
 /** 当前是否 Windows（Everything / Windows 系统集成两个 tab 仅 Windows 显示）。 */
 export const IS_WINDOWS =
@@ -33,6 +34,8 @@ export const CATEGORIES: { key: Category; label: string }[] = [
     : []),
   { key: "privacy", label: "隐私与记录" },
   { key: "misc", label: "杂项" },
+  // BETA-53：本机 MCP 服务（跨平台）——让本机 LLM 客户端经 MCP 检索本机文件。
+  { key: "mcp", label: "本机 MCP 服务" },
 ];
 
 export interface AuditEntry {

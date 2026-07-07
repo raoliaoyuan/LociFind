@@ -8,17 +8,17 @@
 
 - **阶段**：B（Beta）进行中（最新发版 **v0.9.19**）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**daemon 正斜杠 root bug 修复 + 桌面「本机 MCP 服务」设计 & S1 地基**（BETA-53 新卡）——用户诉求「让 Claude Code 经 MCP 检索本机文件」= BETA-32 个人变体（非 BETA-43）；修真机走通中发现的 `read_document` bug（正斜杠 root → `documents.path` 混合分隔符 → `\\?\` canonicalize 路径 lookup 落空，修 = daemon root 入口 `normalize_root` 归一）；[设计提案](docs/reviews/desktop-local-mcp-service-design.md)（内嵌 locifind-server 复用桌面检索栈、127.0.0.1+token）+ **S1 done**（`ServerCtx::attach_readonly` 只读挂载不重索引）。S2/S3 待下轮。**前置**：v0.9.18/19 Windows 真机 10 项已过。
-- **下一步 top-3**：① **桌面「本机 MCP 服务」BETA-53 S2/S3**（接本轮 S1 地基：Tauri 起停命令 + React 开关 UI；让 Claude Code 经 MCP 检索本机文件，[设计](docs/reviews/desktop-local-mcp-service-design.md)）；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ **macOS 真机整体待跑**（出场线 Class A 唯一剩项；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）。
+- **当前 task**：**桌面「本机 MCP 服务」BETA-53 S2/S3 code-done**——接 S1 只读挂载地基：server 加 `personal_local` 多 root 构造器 + `serve_bound`（真 socket 起停集成测试）；桌面 `mcp_service.rs` 四命令（`start/stop_mcp_service`/`mcp_service_status`/`reset_mcp_token`）复用桌面 embedder + 只读挂载 index.db、`127.0.0.1:8766`+随机 token+自启+持久化；前端 `McpPane.tsx`（开关/token 复制/配置片段/重置/安全提示）+ 工具菜单入口。验证 server 93 / desktop 174 / clippy·fmt·tsc+vite 全绿。剩真机（带 semantic-recall 构建 + Claude Code 实连 round-trip）。[设计](docs/reviews/desktop-local-mcp-service-design.md)。
+- **下一步 top-3**：① **BETA-53 真机验证**（带 `semantic-recall` 构建启动 app → 开关 → Claude Code 实连跑 `search`/`read_document` round-trip；依赖用户）；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ **macOS 真机整体待跑**（出场线 Class A 唯一剩项；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（音乐全盘发现语义 2026-07-06 方案 A〔按 roots 过滤〕拍板并落地）。
 
 ## 当前 Task
 
-**2026-07-07 IV（最新）**：**daemon 正斜杠 root bug 修复 + 桌面「本机 MCP 服务」设计 & S1**（BETA-53 新卡；详见同名会话日志 + [设计](docs/reviews/desktop-local-mcp-service-design.md)）。用户诉求「让 Claude Code 经 MCP 检索本机文件」= **BETA-32 个人变体（非 BETA-43）**。① daemon bug（正斜杠 root → `documents.path` 混合分隔符 → `\\?\` canonicalize 路径 lookup 落空 → `read_document` not found）修 = root 入口 `normalize_root` 归一，commit 9b55a1c、正斜杠 root 实测 round-trip OK；② 设计定**内嵌**（非子进程）复用桌面检索栈、**只读挂载**桌面 index.db（零重索引）、`127.0.0.1:8766`+token；③ **S1 done**：`ServerCtx::attach_readonly`（开现有 db 不重索引 + 单测），locifind-server 91 pass / clippy `-D warnings` / fmt 净。S2（Tauri 起停命令）/ S3（React UI）待下轮。
+**2026-07-07 V（最新）**：**桌面「本机 MCP 服务」BETA-53 S2/S3 code-done**（详见同名会话日志 + [设计](docs/reviews/desktop-local-mcp-service-design.md)）。接 S1 只读挂载地基：① **server**——`DaemonConfigFile::personal_local(roots, token)`（桌面多 root 变体、全权 admin、`allow_full_read`）+ `app::serve_bound(listener, ctx, shutdown)`（axum 封装在 server 内）+ 真 socket 起停集成测试；② **桌面 `mcp_service.rs`**——`McpServiceState` + 四命令（`start/stop_mcp_service`/`mcp_service_status`/`reset_mcp_token`），复用桌面 embedder + 只读挂载 index.db、bind `127.0.0.1:8766`（同步拿端口占用错误）、随机 64-hex token、oneshot 优雅关停、开关态+token 持久化 + enabled 时自启；③ **前端 `McpPane.tsx`**——开关/运行状态/token 复制/Claude Code 配置片段/重置/安全提示 + 工具菜单入口 + 选项页第八 tab。安全红线：只绑 127.0.0.1 + token 必填随机 + 暴露面 UI 明示 + 重置即踢连接。验证：server lib 93 / desktop 174 / clippy `-D warnings`〔server·desktop·daemon〕/ fmt / tsc+vite 全绿；三方许可补 getrandom。剩真机验证。
 
 ## 下一步
 
-1. **桌面「本机 MCP 服务」BETA-53**（S1 done 本轮）：**S2** Tauri 后端——`start/stop_mcp_service` 命令用桌面已加载 embedder + 自己 index.db 构 `attach_readonly` ctx、挂 axum router 到 `127.0.0.1:8766`、随机 token、tokio task 起停、开关态+token 存 settings；**S3** React——选项页「本机 MCP 服务」节（开关/地址/token 复制/Claude Code 配置片段/状态）。安全红线：只绑 127.0.0.1、token 必填、暴露面知情（[设计](docs/reviews/desktop-local-mcp-service-design.md)）。
+1. **BETA-53 真机验证**（S2/S3 code-done）：带 `semantic-recall` feature 构建桌面 app → 选项页「本机 MCP 服务」开关启用 → 复制配置片段进 Claude Code `~/.claude/settings.json` → 实连跑 `search` / `read_document` round-trip 验证语义命中 + 出处；核对只绑 127.0.0.1、token 鉴权、重置踢连接（[设计](docs/reviews/desktop-local-mcp-service-design.md)）。
 2. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
 3. **真机验证剩余项**（Windows 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)：BETA-47/50/51/52/29〔v1+v2〕/33〔单实例锁·设置流〕 + 基础搜索 + BETA-12 卸载·升级）——**Windows 仅剩**：BETA-49 音乐发现不越界（依赖目录配置）、BETA-43 出处/`read_document`/审计导出（[playbooks README](docs/playbooks/README.md) 第 8/9 条，需 daemon + 外部 LLM；**其中 `read_document` 正斜杠 root round-trip bug 本轮已修**）、BETA-33 cycle 9 WSearch 状态条 / 全库-概貌口径差；**macOS 整体待跑**（按 [manual-test-scenarios](docs/manual-test-scenarios.md)）。
 4. **发版进度**：**v0.9.18**（BETA-47/48/49/50）+ **v0.9.19**（BETA-51/52）双平台各 success、changelog 齐（[v0.9.19](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.19)）；并发机制累计稳。**Windows 首轮真机 6 项通过**（[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；macOS 真机待跑。
@@ -38,6 +38,14 @@
 ## 会话日志
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
+
+### 2026-07-07 V — Claude Code (Opus 4.8) — 桌面「本机 MCP 服务」BETA-53 S2/S3 code-done
+
+**承接**：接上轮 S1（`attach_readonly` 只读挂载地基），用户「按推荐执行」→ 一并做 S2/S3 推到 code-done + 补端到端闸门 + 收工。
+**产出**：① **server**——`DaemonConfigFile::personal_local(roots, token)`（桌面多 root 变体、全权 admin、`allow_full_read`）+ `app::serve_bound(listener, ctx, shutdown)`（axum 封装在 server 内、桌面侧免直依赖 axum）+ **真 socket 起停集成测试**（`/health` 200 · `/mcp` 无 token 401 · shutdown 5s 内优雅返回，5× 稳定）。② **桌面 `mcp_service.rs`**——`McpServiceState` + 四命令（`start/stop_mcp_service`/`mcp_service_status`/`reset_mcp_token`），复用桌面 embedder + 只读挂载 index.db、bind `127.0.0.1:8766`（同步拿端口占用错误）、随机 64-hex token、oneshot 优雅关停、开关态+token 持久化 settings.json、enabled 时自启。③ **前端 `McpPane.tsx`**——开关 / 运行状态〔地址·挂载条数·语义臂〕/ token 复制 / Claude Code 配置片段复制 / 重置令牌 / 安全提示；工具菜单入口〔`open-prefs-mcp`〕+ 选项页第八 tab。
+**关键决策**：内嵌复用（非子进程）；roots 仅供 `list_collections` 展示（读取面由索引 db 边界天然约束）；安全红线只绑 127.0.0.1 + token 必填随机 + 暴露面 UI 明示 + 重置即踢连接。
+**结果**：server lib 93 pass（+2）/ desktop 174 pass（+3）/ clippy `-D warnings`〔server·desktop·daemon〕/ fmt / tsc+vite 全绿；三方许可补 `getrandom`；设计文档 + ROADMAP BETA-53 标 code-done。
+**未尽事宜**：**真机验证**——带 `semantic-recall` 构建启动 app → 开关 → Claude Code 实连跑 `search`/`read_document` round-trip（依赖用户）。
 
 ### 2026-07-07 IV — Claude Code (Opus 4.8) — daemon 正斜杠 root bug 修复 + 桌面本机 MCP 服务设计 & S1
 
@@ -69,9 +77,3 @@
 **结果**：tsc/vite/clippy `-D warnings`（修 `unnecessary_sort_by`）/171 desktop 测试 全绿；v0.9.18 + v0.9.19 双平台各 success、changelog 齐。
 **未尽事宜**：v0.9.18/19 随真机验证（设置统一返回 / 模型检测·自动发现 / OCR 数字校正 等）。
 
-### 2026-07-06 VI — Claude Code (Fable 5) — BETA-50 OCR 数字校正（真机准考证误识诊断 + 沉淀）
-
-**承接**：用户问「为什么搜 150138 找不到准考证 PNG 内容」→ 实机诊断 index.db：图已入库、trigram 子串匹配正常，根因 = Windows OCR 把 5 识成 S（`15013866763` → `1 S013866763`）+ 空格拆组 → 用户拍板「现在就做」索引端校正。
-**产出**：indexer `digit_correction_variants`（易错字母 S/O/I·l/B/Z → 数字 + 跨单空格分组合并；保守规则：真数字 ≥4 且易错 ≤2、纯数字分组 ≥2 且 ≥6 位）+ `finalize_ocr_text` 收口（**原文保留**、变体以〔OCR数字校正〕行追加，trigram 子串两态可搜）；两 OCR 引擎 + 扫描 PDF 逐页管线共享。
-**结果**：indexer 182（+5：真机 case 四连 / 保守反例 / doc_db FTS e2e）、local-index 26、desktop + server 全量 exit 0；clippy/fmt 净。
-**未尽事宜**：随下次发版生效；存量图片 mtime skip、需清空索引重建才带变体；locifindd 下次构建须重编（indexer 变更）。

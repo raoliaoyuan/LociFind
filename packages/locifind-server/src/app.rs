@@ -15,8 +15,10 @@
 //! 返一份 `Arc<LocifindMcpHandler>`（rmcp 1.8 为 `Arc<T: ServerHandler>` 提供了
 //! blanket `Service` 适配，见 `handler/server.rs::impl_server_handler_for_wrapper!`）。
 
+use std::future::Future;
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use axum::{
     middleware::from_fn_with_state,
     routing::{get, post},
@@ -25,6 +27,7 @@ use axum::{
 use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
 };
+use tokio::net::TcpListener;
 
 use crate::admin::{admin_audit, admin_audit_report, admin_reindex, health};
 use crate::auth::require_bearer;
@@ -85,6 +88,29 @@ pub fn build_app(ctx: Arc<ServerCtx>) -> Router {
         .merge(admin_router)
         .merge(mcp_router)
         .with_state(ctx)
+}
+
+/// 在**已绑定**的 listener 上跑 server 直到 `shutdown` future 就绪（BETA-53 桌面内嵌用）。
+///
+/// 与 daemon 的 `lifecycle::serve` 分工：daemon 走信号（SIGINT/SIGTERM）关停、且自己 bind；
+/// 桌面内嵌由调用方先 `TcpListener::bind`（**同步拿到端口占用错误**反馈给 UI）、再把 listener
+/// 交给本函数，关停由外部 `shutdown` future 驱动（如 `oneshot` 接收端）。axum 收尾已 in-flight
+/// 请求后返回，listener 随之 drop、端口即时可复用。
+///
+/// # Errors
+///
+/// axum server 异常退出时返回 `Err`（正常 graceful shutdown 返回 `Ok`）。
+pub async fn serve_bound(
+    listener: TcpListener,
+    ctx: Arc<ServerCtx>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> anyhow::Result<()> {
+    let router = build_app(ctx);
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown)
+        .await
+        .context("axum server 异常退出")?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -173,5 +199,70 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// 极简 HTTP/1.1 客户端（`Connection: close` → server 应答后关连接，`read_to_string`
+    /// 读到 EOF 返回）。走裸 `std::net::TcpStream`，避免为一个测试引 reqwest/hyper dev-dep。
+    fn http_request(addr: std::net::SocketAddr, raw: &str) -> String {
+        use std::io::{Read as _, Write as _};
+        let mut stream = std::net::TcpStream::connect(addr).expect("连接 server 失败");
+        stream.write_all(raw.as_bytes()).expect("写请求失败");
+        stream.flush().ok();
+        let mut buf = String::new();
+        stream.read_to_string(&mut buf).expect("读响应失败");
+        buf
+    }
+
+    /// BETA-53 桌面内嵌路径端到端：`serve_bound` 真 bind ephemeral 端口后——
+    /// ① `/health` 无鉴权返 200；② `/mcp` 无 token 返 401（鉴权确实透过 bound serve 生效）；
+    /// ③ 触发 shutdown 后 server task 及时返回 Ok（优雅关停不 hang）。
+    /// 锁住桌面开关依赖的「起服务 → 真应答 → 关停」这条链路。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn serve_bound_answers_then_shuts_down_gracefully() {
+        let ctx = build_test_ctx_inmem();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let handle = tokio::spawn(serve_bound(listener, ctx, async move {
+            let _ = rx.await;
+        }));
+
+        // ① /health 无鉴权 → 200
+        let health = tokio::task::spawn_blocking(move || {
+            http_request(
+                addr,
+                "GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+            )
+        })
+        .await
+        .unwrap();
+        assert!(
+            health.starts_with("HTTP/1.1 200"),
+            "/health 应无鉴权返 200，实得响应首行：{}",
+            health.lines().next().unwrap_or("")
+        );
+
+        // ② /mcp 无 Authorization → 401
+        let mcp = tokio::task::spawn_blocking(move || {
+            http_request(
+                addr,
+                "POST /mcp HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n\
+                 Content-Length: 2\r\nConnection: close\r\n\r\n{}",
+            )
+        })
+        .await
+        .unwrap();
+        assert!(
+            mcp.contains(" 401 "),
+            "/mcp 无 token 应返 401，实得响应首行：{}",
+            mcp.lines().next().unwrap_or("")
+        );
+
+        // ③ shutdown → server task 5s 内正常返回 Ok（证明 graceful shutdown 生效、不 hang）
+        tx.send(()).unwrap();
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .expect("shutdown 应在 5s 内完成、不 hang");
+        joined.unwrap().expect("serve_bound 应正常返回 Ok");
     }
 }

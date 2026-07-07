@@ -12,6 +12,7 @@ import { ConfirmModal, ConfirmRequest } from "./preferences/ConfirmModal";
 import { EverythingPane } from "./preferences/EverythingPane";
 import { GeneralPane } from "./preferences/GeneralPane";
 import { IndexingPane } from "./preferences/IndexingPane";
+import { McpPane } from "./preferences/McpPane";
 import { MiscPane } from "./preferences/MiscPane";
 import { PrivacyPane } from "./preferences/PrivacyPane";
 import { SemanticPane } from "./preferences/SemanticPane";
@@ -449,6 +450,8 @@ export default function PreferencesDialog({
               <WindowsPane />
             ) : active === "misc" ? (
               <MiscPane />
+            ) : active === "mcp" ? (
+              <McpPane />
             ) : active === "indexing" ? (
               <IndexingPane
                 settings={settings}

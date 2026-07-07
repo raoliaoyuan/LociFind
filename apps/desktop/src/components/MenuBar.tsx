@@ -219,6 +219,11 @@ export default function MenuBar() {
           label: "隐私与数据...",
           onClick: () => fire("open-prefs-privacy"),
         },
+        {
+          type: "item",
+          label: "本机 MCP 服务...",
+          onClick: () => fire("open-prefs-mcp"),
+        },
         { type: "separator" },
         { type: "item", label: "模型 ▸", disabled: true },
         { type: "item", label: "搜索后端 ▸", disabled: true },

@@ -46,6 +46,13 @@ pub struct AppSettings {
     /// 口径一致）；② 索引期音乐全盘发现回退目录扫描（live-read）；③ 模型本地发现跳过
     /// es.exe 扫描（live-read）。仅 Windows 有意义，其他平台忽略。
     pub enable_everything: bool,
+    /// BETA-53：本机 MCP 服务开关意图（默认关）。为 true 时 app 启动会自动拉起服务
+    /// （只绑 `127.0.0.1`，让本机 LLM 客户端经 MCP 检索本机文件）。用户显式关闭即置 false。
+    pub mcp_service_enabled: bool,
+    /// BETA-53：本机 MCP 服务的 bearer token（首次启用时随机生成、持久化复用）。
+    /// None = 尚未生成；重置令牌时清空并重新生成。**属于敏感凭据**——settings.json
+    /// 已与 index.db 同权限目录，与其他本机数据同级。
+    pub mcp_service_token: Option<String>,
 }
 
 /// BETA-33 cycle 7-b：per-root 子路径排除项。
@@ -84,6 +91,8 @@ impl Default for AppSettings {
             semantic_weight: None,
             enable_image_semantics: false,
             enable_everything: true,
+            mcp_service_enabled: false,
+            mcp_service_token: None,
         }
     }
 }
@@ -263,6 +272,35 @@ pub(crate) fn read_enable_everything(settings_path: &Option<std::path::PathBuf>)
         // 注：不用 `is_none_or`（1.82 稳定）——crate 声明 rust-version 1.80，
         // clippy `incompatible_msrv` 会拦。
         .map_or(true, |v| v.enable_everything)
+}
+
+/// BETA-53：best-effort 读取完整 `AppSettings`（`settings_path` 指向 settings.json）。
+/// 读 / 解析失败 → `Default`（与其他 live-read 一致的安全侧；本机 MCP 服务模块用它
+/// 读开关态 + token + 生效索引 roots，不经 `AppHandle`）。
+pub(crate) fn read_settings_or_default(settings_path: &Option<PathBuf>) -> AppSettings {
+    settings_path
+        .as_ref()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<AppSettings>(&s).ok())
+        .unwrap_or_default()
+}
+
+/// BETA-53：把 `AppSettings` 落盘到 settings.json（含父目录创建）。
+/// 供本机 MCP 服务模块持久化开关态 / token（不经 `AppHandle` 的 `update_settings` 命令）。
+///
+/// # Errors
+///
+/// 创建目录 / 序列化 / 写文件任一失败时返回 `Err(描述)`。
+pub(crate) fn write_settings(
+    settings_path: &std::path::Path,
+    settings: &AppSettings,
+) -> Result<(), String> {
+    if let Some(parent) = settings_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
+    }
+    let content =
+        serde_json::to_string_pretty(settings).map_err(|e| format!("序列化设置失败: {e}"))?;
+    fs::write(settings_path, content).map_err(|e| format!("写入设置失败: {e}"))
 }
 
 /// 设置文件路径（BETA-21 隐私面板复用，展示「配置在哪」）。

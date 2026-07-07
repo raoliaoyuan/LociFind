@@ -16,7 +16,8 @@ export type MenuAction =
   | "open-prefs" // 工具→选项 / Ctrl+, ——打开模态选项卡片（替代旧 /settings 路由跳转）
   | "open-prefs-indexing" // 快速入门第 5 步→打开选项对话框并跳到「索引」分类
   | "open-prefs-misc" // 工具→我的同义词→打开选项对话框并跳到「杂项」分类（2026-07-07 整页收编）
-  | "open-prefs-privacy"; // 工具→隐私与数据→打开选项对话框并跳到「隐私与记录」分类（2026-07-07 整页收编）
+  | "open-prefs-privacy" // 工具→隐私与数据→打开选项对话框并跳到「隐私与记录」分类（2026-07-07 整页收编）
+  | "open-prefs-mcp"; // 工具→本机 MCP 服务→打开选项对话框并跳到「本机 MCP 服务」分类（BETA-53）
 
 const CHANNEL = "locifind:menu";
 

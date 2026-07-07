@@ -76,6 +76,7 @@
 | tower-http | 0.7.0 | HTTP 中间件（trace + limit） | crates.io | MIT | 否 | 是 | BETA-32 admin REST 限流/追踪 |
 | secrecy | 0.10.3 | Bearer token 凭据封装 | crates.io | MIT OR Apache-2.0 | 否 | 是 | BETA-32 T5 auth；防 token 误日志 |
 | subtle | 2.6.1 | 常量时间比较 | crates.io | BSD-3-Clause | 否 | 是 | BETA-32 T5 鉴权 timing-safe equals |
+| getrandom | 0.2.17 | OS CSPRNG（随机 bearer token） | crates.io | MIT OR Apache-2.0 | 否 | 是 | BETA-53 桌面内嵌本机 MCP 服务 token 生成；本就为 rustls/reqwest 传递依赖，BETA-53 起桌面直依赖 |
 | parking_lot | 0.12 | 快速锁原语 | crates.io | MIT OR Apache-2.0 | 否 | 是 | BETA-32 server 共享状态锁 |
 | async-trait | 0.1 | trait async fn 桥接 | crates.io | MIT OR Apache-2.0 | 否 | 是 | BETA-32 server 内部 trait（注：rmcp 1.8 `ServerHandler` 用 RPIT，不走 async-trait） |
 | httptest | 0.16.4 | HTTP mock server（dev-only） | crates.io | MIT OR Apache-2.0 | 否 | 否 | BETA-32 集成测试，仅 `[dev-dependencies]`，不进生产分发 |

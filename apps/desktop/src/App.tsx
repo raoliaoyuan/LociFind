@@ -25,7 +25,7 @@ function App() {
   // 打开选项对话框时默认选中的分类；null = 用默认「常规」。
   // 快速入门第 5 步走「索引」；工具菜单「我的同义词 / 隐私与数据」走「杂项 / 隐私与记录」。
   const [prefsInitialCategory, setPrefsInitialCategory] = useState<
-    "general" | "semantic" | "indexing" | "privacy" | "misc" | null
+    "general" | "semantic" | "indexing" | "privacy" | "misc" | "mcp" | null
   >(null);
 
   // BETA-33 cycle 3：监听菜单事件 `open-prefs`、打开模态选项对话框（替代旧 navigate("/settings")）。
@@ -45,6 +45,9 @@ function App() {
           setShowPrefs(true);
         } else if (a === "open-prefs-privacy") {
           setPrefsInitialCategory("privacy");
+          setShowPrefs(true);
+        } else if (a === "open-prefs-mcp") {
+          setPrefsInitialCategory("mcp");
           setShowPrefs(true);
         }
       }),
