@@ -5,6 +5,15 @@
 > 后续会话的详录写入 session-details-YYYY-MM.md、溢出摘要滚动追加到本文件。
 
 ---
+### 2026-07-06 V — Claude Code (Fable 5) — BETA-48 修复 + BETA-49 音乐发现按 roots 过滤
+
+**承接**：BETA-47 收工后用户指示继续处理两条顺带发现 → BETA-48 直接修、发现语义经 AskUserQuestion 拍板方案 A 后当场落地。
+**关键决策**：音乐全盘发现改**按生效 roots 过滤入库**（发现器纯做加速、越界不入库；空 roots 连 es.exe 都不 spawn）——BETA-46 零索引语义对齐，BETA-01A「全盘入库」废弃；旧库越界记录不主动清（沿用「生效目录之外」提示 + purge 口径）。
+**产出**：local-index 三处发现分支统一过滤 + `filter_discovered_to_roots` 纯函数；BETA-48 `embedding_model_path` 前端透传 + 语义 tab 路径覆盖 UI；文案「全盘发现」→「快速发现（仅限所选目录）」。
+**结果**：local-index 26（+2，含改写的行为变更测试）/ desktop 全量 exit 0；clippy（清 2 条 doc 缩进）/fmt/tsc/vite 净。
+**未尽事宜**：音乐发现不越界随 BETA-47 真机一并验证。
+
+---
 ### 2026-07-06 IV — Claude Code (Fable 5) — BETA-47 选项页重构（七 tab + Everything 开关 + 拆文件）
 
 **承接**：用户问「本次会话该做什么」→ 判定 BETA-47 为唯一标注「下会话」的主卡 → 用户拍板直接开工。

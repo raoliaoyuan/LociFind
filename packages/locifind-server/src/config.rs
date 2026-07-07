@@ -141,6 +141,79 @@ impl std::fmt::Debug for ServerCtx {
 }
 
 impl ServerCtx {
+    /// 只读挂载已建索引构造 `ServerCtx`（桌面内嵌本机 MCP 服务用；设计
+    /// [`docs/reviews/desktop-local-mcp-service-design.md`] S1）。
+    ///
+    /// 与 daemon 的 `build_runtime_ctx` 的**唯一区别**：**不跑首次全量索引**——
+    /// 索引由外部（桌面后台调度）维护，本 ctx 只读检索。逐 collection 打开现有
+    /// index.db（`open` 幂等、只 ensure schema 不改数据）、按 embedder 探针装配候选
+    /// 链、读当前 `doc_count`；embedder 由调用方传入（复用外部已加载模型，避免二次
+    /// 加载 GGUF），`embed("ping")` 成功才挂语义臂、否则 FTS-only。
+    ///
+    /// `indexed_at` 置 `None`：本 ctx 未亲自索引，时间未知（索引新鲜度以外部为准）。
+    ///
+    /// # Errors
+    ///
+    /// 任一 collection 的 index.db 打开失败或 `count()` 失败时返回 `Err`。
+    ///
+    /// [`docs/reviews/desktop-local-mcp-service-design.md`]:
+    ///     ../../../docs/reviews/desktop-local-mcp-service-design.md
+    pub fn attach_readonly(
+        config: ServerConfig,
+        embedder: Arc<dyn TextEmbedder>,
+    ) -> anyhow::Result<Self> {
+        use anyhow::Context as _;
+
+        // 语义臂随 embedder 探针装配（与 daemon 一致）：stub / 加载失败 → FTS-only。
+        let semantic_ready = embedder.embed("ping").is_ok();
+
+        let mut collections: BTreeMap<String, CollectionRuntime> = BTreeMap::new();
+        for meta in config.access.collections.clone() {
+            let db_path = collection_db_path(&config.data_dir, &meta.id);
+            let music_index = MusicIndex::open(&db_path)
+                .with_context(|| format!("打开 MusicIndex 失败：{}", db_path.display()))?;
+            let document_index = DocumentIndex::open(&db_path)
+                .with_context(|| format!("打开 DocumentIndex 失败：{}", db_path.display()))?;
+
+            let music_count = music_index.count().context("MusicIndex.count() 失败")?;
+            let document_count = document_index
+                .count()
+                .context("DocumentIndex.count() 失败")?;
+            let doc_count = music_count.saturating_add(document_count);
+
+            let search_candidates = Arc::new(crate::tools::search::build_local_search_candidates(
+                db_path.clone(),
+                semantic_ready.then(|| embedder.clone()),
+            ));
+
+            let rt = CollectionRuntime {
+                meta,
+                db_path,
+                music_index: Arc::new(Mutex::new(music_index)),
+                document_index: Arc::new(Mutex::new(document_index)),
+                search_candidates,
+                state: Arc::new(RwLock::new(CollectionState {
+                    indexed_at: None,
+                    doc_count,
+                    reindex_in_flight: false,
+                })),
+            };
+            collections.insert(rt.meta.id.clone(), rt);
+        }
+
+        let audit = Arc::new(crate::audit::AuditSink::new(
+            &config.data_dir,
+            config.access.audit.log_query,
+        ));
+
+        Ok(Self {
+            config,
+            embedder,
+            collections,
+            audit,
+        })
+    }
+
     /// 从 `ServerCtx` 派生出窄一点的 [`AuthCtx`]，
     /// 用于装配 bearer 中间件 layer（避免给 middleware 注入完整索引）。
     #[must_use]
@@ -157,6 +230,7 @@ impl ServerCtx {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     #[test]
@@ -174,6 +248,64 @@ mod tests {
                 .join("collections")
                 .join("case-a")
                 .join("index.db")
+        );
+    }
+
+    /// S1 只读挂载：外部先建好 index.db，`attach_readonly` 只开库不重索引、
+    /// 读到既有 `doc_count`、装配候选链，`indexed_at` 为 None（未亲自索引）。
+    #[test]
+    fn attach_readonly_opens_existing_index_without_reindexing() {
+        use secrecy::SecretString;
+
+        use locifind_indexer::{DocumentIndex, NoopProgress};
+
+        use crate::collections::{DaemonConfigFile, LEGACY_COLLECTION_ID};
+        use crate::test_support::StubEmbedder;
+
+        let tmp = tempfile::tempdir().expect("tempdir 应建成功");
+        let data_dir = tmp.path().join("data");
+        let root = tmp.path().join("root");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("note.txt"), "quarterly budget planning notes").unwrap();
+
+        // 模拟「桌面」先把索引建好，然后关闭写连接（drop）。
+        let db_path = collection_db_path(&data_dir, LEGACY_COLLECTION_ID);
+        {
+            let doc = DocumentIndex::open(&db_path).expect("open doc index");
+            let stats = doc
+                .index_dirs_with_progress(std::slice::from_ref(&root), &NoopProgress)
+                .expect("预建索引应能跑");
+            assert!(stats.added >= 1, "预建索引应至少 1 篇");
+        }
+
+        let access = DaemonConfigFile::legacy_single_root(root, SecretString::from("x".repeat(32)));
+        let config = ServerConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            data_dir,
+            model_path: PathBuf::from("unused-for-attach.gguf"),
+            log_level: LevelFilter::WARN,
+            semantic_weight: locifind_result_normalizer::DEFAULT_SEMANTIC_WEIGHT,
+            embed_images: true,
+            access,
+        };
+
+        let ctx = ServerCtx::attach_readonly(config, Arc::new(StubEmbedder::default()))
+            .expect("attach_readonly 应成功");
+        let rt = ctx
+            .collection(LEGACY_COLLECTION_ID)
+            .expect("default collection 应在");
+        assert!(
+            rt.state.read().doc_count >= 1,
+            "只读挂载应读到已建索引的 doc_count"
+        );
+        assert!(
+            rt.state.read().indexed_at.is_none(),
+            "attach 未亲自索引、indexed_at 应为 None"
+        );
+        assert!(
+            !rt.search_candidates.is_empty(),
+            "应装配 search 候选链（stub embedder embed 成功 → 含语义臂）"
         );
     }
 }

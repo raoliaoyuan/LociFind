@@ -8,24 +8,25 @@
 
 - **阶段**：B（Beta）进行中（最新发版 **v0.9.19**）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**v0.9.18/19 Windows 真机验证 10 项通过**（[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）——computer-use 实证 BETA-47/51/52/50/29(v1+v2)/33(单实例锁·设置流) + 基础搜索 + 用户手验 BETA-12 卸载·升级零损失。Windows 仅剩 BETA-49/43/33(WSearch·口径差)；**macOS 真机整体待跑**。
-- **下一步 top-3**：① **Windows 真机验证 10 项通过**（[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)：BETA-47/50/51/52/29/33〔单实例锁·设置流〕 computer-use 实证 + BETA-12 用户手验）→ Windows 仅剩 BETA-49/43/33(WSearch·口径差)、**macOS 整体待跑**；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ 双平台真机复跑填 [beta-exit.md](docs/reviews/beta-exit.md) TODO 格。
+- **当前 task**：**daemon 正斜杠 root bug 修复 + 桌面「本机 MCP 服务」设计 & S1 地基**（BETA-53 新卡）——用户诉求「让 Claude Code 经 MCP 检索本机文件」= BETA-32 个人变体（非 BETA-43）；修真机走通中发现的 `read_document` bug（正斜杠 root → `documents.path` 混合分隔符 → `\\?\` canonicalize 路径 lookup 落空，修 = daemon root 入口 `normalize_root` 归一）；[设计提案](docs/reviews/desktop-local-mcp-service-design.md)（内嵌 locifind-server 复用桌面检索栈、127.0.0.1+token）+ **S1 done**（`ServerCtx::attach_readonly` 只读挂载不重索引）。S2/S3 待下轮。**前置**：v0.9.18/19 Windows 真机 10 项已过。
+- **下一步 top-3**：① **桌面「本机 MCP 服务」BETA-53 S2/S3**（接本轮 S1 地基：Tauri 起停命令 + React 开关 UI；让 Claude Code 经 MCP 检索本机文件，[设计](docs/reviews/desktop-local-mcp-service-design.md)）；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ **macOS 真机整体待跑**（出场线 Class A 唯一剩项；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（音乐全盘发现语义 2026-07-06 方案 A〔按 roots 过滤〕拍板并落地）。
 
 ## 当前 Task
 
-**2026-07-07 II（最新）**：**enterprise 评测闸门加固**（BETA-44 合成扩容已 done、转做闸门防假绿；纯 evals/fixture、未发版）。判定 BETA-44 卡片 done（53 case、2026-07-04 真机 53/53），新 case 无法本机验真、卡片明确反对凑数 → 加固离线闸门。**改动**：① `enterprise.rs` `Expectation::AccessDenied` 改带可选墙目标 `{ target }` + parser 支持 `ACCESS_DENIED:<相对路径>`（裸标记仍兼容、空/畸形报错），运行期不消费该字段（越权探针语义 byte 不变、真机 `--require-all` 零回归）；② queries.tsv 11 条越权补墙目标（各指向真实存在、subject 未授权 collection 内的文件，含此前仅作墙的 `audit-2025-facilities`/`offboarding-other-tech`）；③ `enterprise_scenarios_gate` 两条常跑离线断言——**每声明 collection 被 ≥1 case 演练**（无死 collection）+ **每条越权墙目标非空洞**；④ evals/README 校正陈旧「22 case/3 越权」→ 53/11 + 补 TSV 格式。**意义**：把"信息墙有没有真被测到"从人工审阅变成常跑 CI 机器可查、不依赖真机/模型（CONVENTIONS §3「踩坑→闸门」）。验证：lib 67 pass（含新单测）/ gate 6 pass（含 2 新断言，e2e 无环境变量自跳过）/ clippy `-D warnings` 净 / fmt 净。
+**2026-07-07 IV（最新）**：**daemon 正斜杠 root bug 修复 + 桌面「本机 MCP 服务」设计 & S1**（BETA-53 新卡；详见同名会话日志 + [设计](docs/reviews/desktop-local-mcp-service-design.md)）。用户诉求「让 Claude Code 经 MCP 检索本机文件」= **BETA-32 个人变体（非 BETA-43）**。① daemon bug（正斜杠 root → `documents.path` 混合分隔符 → `\\?\` canonicalize 路径 lookup 落空 → `read_document` not found）修 = root 入口 `normalize_root` 归一，commit 9b55a1c、正斜杠 root 实测 round-trip OK；② 设计定**内嵌**（非子进程）复用桌面检索栈、**只读挂载**桌面 index.db（零重索引）、`127.0.0.1:8766`+token；③ **S1 done**：`ServerCtx::attach_readonly`（开现有 db 不重索引 + 单测），locifind-server 91 pass / clippy `-D warnings` / fmt 净。S2（Tauri 起停命令）/ S3（React UI）待下轮。
 
 ## 下一步
 
-1. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
-2. **真机验证剩余项**（Windows 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)：BETA-47/50/51/52/29〔v1+v2〕/33〔单实例锁·设置流〕 + 基础搜索 + BETA-12 卸载·升级）——**Windows 仅剩**：BETA-49 音乐发现不越界（依赖目录配置）、BETA-43 出处/`read_document`/审计导出（[playbooks README](docs/playbooks/README.md) 第 8/9 条，需 daemon + 外部 LLM）、BETA-33 cycle 9 WSearch 状态条 / 全库-概貌口径差；**macOS 整体待跑**（按 [manual-test-scenarios](docs/manual-test-scenarios.md)）。
-3. **发版进度**：**v0.9.18**（BETA-47/48/49/50）+ **v0.9.19**（BETA-51/52）双平台各 success、changelog 齐（[v0.9.19](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.19)）；并发机制累计稳。**Windows 首轮真机 6 项通过**（[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；macOS 真机待跑。
-4. **BETA-10 剩余**：macOS DMG 产物 CI done 且 **v0.9.15 首验通过**；剩 macOS 真机放行验证（§6.3）；winget 待 BETA-14 后 / Homebrew tap 可启动（DMG CI 已跑通）。
-5. **BETA-40 真实内网证据**：唯一剩余验收项，依赖 ①。
-6. **剩余 6 条 partial**（不阻塞出场线，[beta-exit §3.4](docs/reviews/beta-exit.md)）：全为 v0.5 标注锁定项（markdown ft / 「上个月下载的」动词歧义 / 项目归档 location / downloads hint 双语 ×2，改标注吃 §6.5 豁免额度）+ 备份文件两难。parser 可确定性收割已见底。
-7. **BETA-29 v2 余量**：修正样本入 BETA-30 失败样本箱（依赖 BETA-30 开工，唯一剩余项）。
-8. **V10-16 主卡**（隐私 UI 集成 + 全量策略收口）：BETA-43 先导拆出后缩量，待 V 阶段。
+1. **桌面「本机 MCP 服务」BETA-53**（S1 done 本轮）：**S2** Tauri 后端——`start/stop_mcp_service` 命令用桌面已加载 embedder + 自己 index.db 构 `attach_readonly` ctx、挂 axum router 到 `127.0.0.1:8766`、随机 token、tokio task 起停、开关态+token 存 settings；**S3** React——选项页「本机 MCP 服务」节（开关/地址/token 复制/Claude Code 配置片段/状态）。安全红线：只绑 127.0.0.1、token 必填、暴露面知情（[设计](docs/reviews/desktop-local-mcp-service-design.md)）。
+2. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
+3. **真机验证剩余项**（Windows 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)：BETA-47/50/51/52/29〔v1+v2〕/33〔单实例锁·设置流〕 + 基础搜索 + BETA-12 卸载·升级）——**Windows 仅剩**：BETA-49 音乐发现不越界（依赖目录配置）、BETA-43 出处/`read_document`/审计导出（[playbooks README](docs/playbooks/README.md) 第 8/9 条，需 daemon + 外部 LLM；**其中 `read_document` 正斜杠 root round-trip bug 本轮已修**）、BETA-33 cycle 9 WSearch 状态条 / 全库-概貌口径差；**macOS 整体待跑**（按 [manual-test-scenarios](docs/manual-test-scenarios.md)）。
+4. **发版进度**：**v0.9.18**（BETA-47/48/49/50）+ **v0.9.19**（BETA-51/52）双平台各 success、changelog 齐（[v0.9.19](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.19)）；并发机制累计稳。**Windows 首轮真机 6 项通过**（[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；macOS 真机待跑。
+5. **BETA-10 剩余**：macOS DMG 产物 CI done 且 **v0.9.15 首验通过**；剩 macOS 真机放行验证（§6.3）；winget 待 BETA-14 后 / Homebrew tap 可启动（DMG CI 已跑通）。
+6. **BETA-40 真实内网证据**：唯一剩余验收项，依赖 ②。
+7. **剩余 6 条 partial**（不阻塞出场线，[beta-exit §3.4](docs/reviews/beta-exit.md)）：全为 v0.5 标注锁定项（markdown ft / 「上个月下载的」动词歧义 / 项目归档 location / downloads hint 双语 ×2，改标注吃 §6.5 豁免额度）+ 备份文件两难。parser 可确定性收割已见底。
+8. **BETA-29 v2 余量**：修正样本入 BETA-30 失败样本箱（依赖 BETA-30 开工，唯一剩余项）。
+9. **V10-16 主卡**（隐私 UI 集成 + 全量策略收口）：BETA-43 先导拆出后缩量，待 V 阶段。
 
 **流程备忘**：Windows 发版 = bump 版本（tauri.conf.json + Cargo.toml）→ 推 `v*` tag 触发 release-windows.yml → Release 说明含 changelog（CONVENTIONS §8）。Windows 编带 llama 的 locifindd 一律用 `scripts\build-locifindd-llama.bat`。
 
@@ -37,6 +38,14 @@
 ## 会话日志
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
+
+### 2026-07-07 IV — Claude Code (Opus 4.8) — daemon 正斜杠 root bug 修复 + 桌面本机 MCP 服务设计 & S1
+
+**承接**：用户问「能否工具菜单开关 BETA-43」→ 澄清诉求实为「让 Claude Code 经 MCP 检索本机文件」= **BETA-32 个人变体（非 BETA-43）**。本机跑通独立 daemon 验证（FTS-only、search 内容命中准考证），走通中发现 `read_document` round-trip bug → 用户「先查 bug 再实现 A」。
+**关键决策**：桌面「本机 MCP 服务」走**内嵌**（非起子进程）——复用桌面已加载检索栈、**只读挂载**桌面 index.db（零重索引、语义白送）；端口 **8766**、只绑 `127.0.0.1` + token。
+**产出**：① daemon bug 修复（正斜杠 root → `documents.path` 混合分隔符 → `\\?\` canonicalize 路径 lookup 落空，修 = root 入口 `normalize_root` 归一 + 单测；正斜杠 root 实测 round-trip OK，commit 9b55a1c）；② [设计提案](docs/reviews/desktop-local-mcp-service-design.md)（3 阶段 S1-S3）；③ **S1 done**：`ServerCtx::attach_readonly`（开现有 db 不跑首索引、复用传入 embedder + 单测）。
+**结果**：locifind-server 91 pass / clippy `-D warnings` / fmt 净；BETA-53 登 ROADMAP。
+**未尽事宜**：S2（Tauri 起停命令 + 设置持久化）/ S3（React UI）下轮。
 
 ### 2026-07-07 III — Claude Code (Opus 4.8) — v0.9.18/19 Windows 真机验证（computer-use 驱动）
 
@@ -66,11 +75,3 @@
 **产出**：indexer `digit_correction_variants`（易错字母 S/O/I·l/B/Z → 数字 + 跨单空格分组合并；保守规则：真数字 ≥4 且易错 ≤2、纯数字分组 ≥2 且 ≥6 位）+ `finalize_ocr_text` 收口（**原文保留**、变体以〔OCR数字校正〕行追加，trigram 子串两态可搜）；两 OCR 引擎 + 扫描 PDF 逐页管线共享。
 **结果**：indexer 182（+5：真机 case 四连 / 保守反例 / doc_db FTS e2e）、local-index 26、desktop + server 全量 exit 0；clippy/fmt 净。
 **未尽事宜**：随下次发版生效；存量图片 mtime skip、需清空索引重建才带变体；locifindd 下次构建须重编（indexer 变更）。
-
-### 2026-07-06 V — Claude Code (Fable 5) — BETA-48 修复 + BETA-49 音乐发现按 roots 过滤
-
-**承接**：BETA-47 收工后用户指示继续处理两条顺带发现 → BETA-48 直接修、发现语义经 AskUserQuestion 拍板方案 A 后当场落地。
-**关键决策**：音乐全盘发现改**按生效 roots 过滤入库**（发现器纯做加速、越界不入库；空 roots 连 es.exe 都不 spawn）——BETA-46 零索引语义对齐，BETA-01A「全盘入库」废弃；旧库越界记录不主动清（沿用「生效目录之外」提示 + purge 口径）。
-**产出**：local-index 三处发现分支统一过滤 + `filter_discovered_to_roots` 纯函数；BETA-48 `embedding_model_path` 前端透传 + 语义 tab 路径覆盖 UI；文案「全盘发现」→「快速发现（仅限所选目录）」。
-**结果**：local-index 26（+2，含改写的行为变更测试）/ desktop 全量 exit 0；clippy（清 2 条 doc 缩进）/fmt/tsc/vite 净。
-**未尽事宜**：音乐发现不越界随 BETA-47 真机一并验证。
