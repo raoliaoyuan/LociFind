@@ -26,13 +26,30 @@
 三工具经 MCP 暴露、真实索引上的 `search` 命中与 `read_document` 读取、重置令牌停服务并轮换。
 covered 了 playbook §2 / §3 / §4 的功能实质。
 
-## 尚未覆盖（需真机 GUI / 外部客户端 / 语义构建）
+## 追加：真机 GUI 全流程验证（2026-07-07 同日，computer-use 驱动 dev app）
 
-1. **§1 GUI 交互**：选项页开关点选、token 一键复制、配置片段复制、重启自启的**视觉呈现**
-   （命令层已验，React `McpPane` 仅调这些命令 + 渲染，tsc/vite 已过）。
-2. **§3 真 Claude Code 客户端**：本验证以 reqwest 充当 MCP 客户端；用真实 Claude Code 进程连
-   `~/.claude/settings.json` 的 round-trip 待真机走一遍。
-3. **语义命中（路径 B）**：本次 FTS-only；带 `semantic-recall` 构建 + embedding 模型下的
+`npm run tauri dev` 起带 BETA-53 的 dev app（`semantic_recall_feature=false`＝路径 A），computer-use 实点验证。
+遇到环境障碍：LociFind 主窗口默认隐藏、经全局快捷键唤起，而默认 `Ctrl+Space` 被搜狗输入法拦截（[已知坑](../../CLAUDE.md)），
+临时把 dev 的 `global_shortcut` 改 `Ctrl+Alt+Space` 唤起窗口（**验后已复原为 `Ctrl+Space`**）。
+
+| 项 | 结果 |
+|---|---|
+| 启动自启（`mcp_service_enabled=true` 持久化 → 启动即拉起） | ✅ 日志「本机 MCP 服务已按上次开关态自动启动」、起即监听 8766 |
+| 工具菜单「本机 MCP 服务...」→ 选项对话框定位第八 tab | ✅ 路由正确 |
+| 开关态 + 状态行 | ✅「✓ 运行中 · 监听 127.0.0.1:8766 · 已挂载 86 条索引 · 仅全文（未启用语义召回）」与后端一致 |
+| token 展示 + 配置片段复制 | ✅ 剪贴板实读 = 合法片段（`url:http://127.0.0.1:8766/mcp` + `Bearer <token>`） |
+| GUI 开关 **OFF** | ✅ 8766 停止监听 + `mcp_service_enabled=false` 持久化 |
+| GUI 开关 **ON** | ✅ 8766 重新监听 + `mcp_service_enabled=true` 持久化 |
+| 对**实跑 app** curl round-trip | ✅ /health 200 · 无 token 401 · tools/list 三工具 · search 命中真实 PDF · read_document 1548 字节片段（mode=snippets、无越权） |
+| 旧设置迁移 | ✅ v0.9.19 写的 settings.json（无 `mcp_service_*` 字段）被新 dev app 正常读取（serde default） |
+
+**结论**：真机 dev app 上 GUI 全流程 + 开关联动后端起停 + 复制 + 自启 + 旧设置迁移**全部通过**。
+
+## 尚未覆盖（依赖用户 / 语义构建）
+
+1. **真 Claude Code 进程客户端**：本验证以 reqwest/curl 充当 MCP 客户端（协议同一、全通过）；
+   用真实 Claude Code 进程连 `~/.claude/settings.json` 的 round-trip 待用户走一遍（未擅改用户 Claude 配置）。
+2. **语义命中（路径 B）**：本次 FTS-only；带 `semantic-recall` 构建 + embedding 模型下的
    「按意思 / 跨语言」命中待验（模型文件 `embeddinggemma-300m-q8_0.gguf` 已在位）。
 
-以上三项通过后，ROADMAP BETA-53 可由 code-done 转 done。
+以上两项通过后，ROADMAP BETA-53 可由 code-done 转 done。
