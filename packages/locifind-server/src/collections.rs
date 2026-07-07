@@ -149,6 +149,25 @@ pub struct DaemonConfigFile {
     pub audit: AuditConfig,
 }
 
+/// 归一 root 路径分隔符到原生形态（Windows：`/` → `\`）。
+///
+/// 动机：`--root C:/foo`（或 TOML `roots = ['C:/foo']`）这类正斜杠输入，经
+/// indexer `root.join(file_name)` 会拼出**混合分隔符** `C:/foo\bar.png` 存进
+/// `documents.path`；而 `search` 命中 path 走 `canonicalize` 产出全反斜杠
+/// `\\?\C:\foo\bar.png`，[`crate::provenance::lookup_candidates`] 只 strip `\\?\`、
+/// 不改分隔符 → `read_document` 精确查库落空（"document not found"）。在 root 入口
+/// 归一为原生分隔符即让 `documents.path` 一致、round-trip 成立。`components()`
+/// 同时会正规化冗余分隔符与 `.`；空路径兜底返回原值。
+#[must_use]
+fn normalize_root(root: PathBuf) -> PathBuf {
+    let normalized: PathBuf = root.components().collect();
+    if normalized.as_os_str().is_empty() {
+        root
+    } else {
+        normalized
+    }
+}
+
 impl DaemonConfigFile {
     /// legacy 单根模式合成：`--root`/`--token` → default collection（读写）+
     /// subject=`default` 全权 admin token。现有部署零迁移。
@@ -159,7 +178,7 @@ impl DaemonConfigFile {
                 id: LEGACY_COLLECTION_ID.to_string(),
                 display_name: None,
                 subject_kind: SubjectKind::Other,
-                roots: vec![root],
+                roots: vec![normalize_root(root)],
                 read_only: false,
                 audit_tags: Vec::new(),
                 allow_full_read: true,
@@ -214,7 +233,12 @@ pub fn is_valid_collection_id(id: &str) -> bool {
 /// TOML 语法错误返 [`ConfigError::Toml`]；语义校验失败返 [`ConfigError::Invalid`]
 /// （信息不含 token 内容）。
 pub fn parse_config_toml(text: &str) -> Result<DaemonConfigFile, ConfigError> {
-    let cfg: DaemonConfigFile = toml::from_str(text)?;
+    let mut cfg: DaemonConfigFile = toml::from_str(text)?;
+    // root 分隔符归一（详见 [`normalize_root`]）：正斜杠 TOML root 在 Windows 上
+    // 否则会让 search→read_document round-trip 落空。
+    for c in &mut cfg.collections {
+        c.roots = c.roots.drain(..).map(normalize_root).collect();
+    }
     validate(&cfg)?;
     Ok(cfg)
 }
@@ -388,6 +412,40 @@ log_query = false
         );
         assert_eq!(cfg.tokens[0].token.expose_secret(), TOKEN_A);
         assert!(cfg.audit.log_query, "legacy 模式 audit 缺省开");
+    }
+
+    #[test]
+    fn normalize_root_yields_native_separators() {
+        // 正斜杠 root 输入应归一为原生分隔符，避免 documents.path 混合分隔符导致
+        // search→read_document round-trip 落空（bug：读取报 document not found）。
+        let n = normalize_root(PathBuf::from("C:/Users/x/Downloads"));
+        #[cfg(windows)]
+        {
+            assert_eq!(n.to_string_lossy(), r"C:\Users\x\Downloads");
+            assert!(
+                !n.to_string_lossy().contains('/'),
+                "Windows 归一后不应残留正斜杠"
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            // Unix 上正斜杠即原生；components 正规化后语义不变。
+            assert_eq!(n.to_string_lossy(), "C:/Users/x/Downloads");
+        }
+        assert_eq!(normalize_root(n.clone()), n, "归一应幂等");
+    }
+
+    #[test]
+    fn legacy_single_root_normalizes_forward_slash_root() {
+        let cfg = DaemonConfigFile::legacy_single_root(
+            PathBuf::from("C:/data/archive"),
+            SecretString::from(TOKEN_A.to_string()),
+        );
+        let stored = cfg.collections[0].roots[0].to_string_lossy().into_owned();
+        #[cfg(windows)]
+        assert_eq!(stored, r"C:\data\archive");
+        #[cfg(not(windows))]
+        assert_eq!(stored, "C:/data/archive");
     }
 
     #[test]
