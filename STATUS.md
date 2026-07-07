@@ -6,21 +6,21 @@
 
 ## 📍 速览
 
-- **阶段**：B（Beta）进行中；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
+- **阶段**：B（Beta）进行中（最新发版 **v0.9.19**）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**BETA-47/48/49/50 done（代码层）**——选项页七 tab + `enable_everything` 三处 es.exe 门控（47）；`embedding_model_path` 透传（48）；音乐发现按 roots 过滤（49）；**OCR 数字校正变体**（50，真机准考证 5→S 误识沉淀：原文保留 + 校正变体追加可搜）。待随下次发版真机验证。
-- **下一步 top-3**：① v0.9.17 + BETA-47/49 真机验证（用户进行中：下载取消/镜像兜底/三行布局/卸载保模型/零索引空态/Everything tab 两态/音乐发现不越界/升级零损失）；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ 双平台真机复跑填 [beta-exit.md](docs/reviews/beta-exit.md) TODO 格。
+- **当前 task**：**BETA-51/52 done（代码层，已随 v0.9.19 发版）**——设置统一入口（51：同义词/隐私两独立整页收编进选项 tab，修「设置整页无返回入口」）；语义召回模型管理增强（52：显示当前模型 + 检测按钮 + 自动发现本机 gguf 一键设为语义/生成）。BETA-47/48/49/50 已随 v0.9.18 发版。
+- **下一步 top-3**：① v0.9.18/19 真机验证（设置统一返回 / 模型检测·自动发现 / OCR 数字校正 + 上一轮的下载取消·镜像·卸载保模型·零索引等）；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ 双平台真机复跑填 [beta-exit.md](docs/reviews/beta-exit.md) TODO 格。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（音乐全盘发现语义 2026-07-06 方案 A〔按 roots 过滤〕拍板并落地）。
 
 ## 当前 Task
 
-**2026-07-06 VI（最新）**：**BETA-50 OCR 数字校正（真机踩坑同轮沉淀）**。用户反馈「搜 150138 找不到准考证 PNG」→ 实机诊断 index.db 实锤根因 = Windows OCR **5→S 误识 + 空格拆组**（`15013866763` → `1 S013866763`；图已入库、trigram 子串匹配本身正常，命中的两条全是文件名命中）。索引端修法：indexer 新增 `digit_correction_variants`（易错字母 S/O/I·l/B/Z → 数字 + 跨单空格分组合并；保守规则宁漏勿误：真数字 ≥4 且易错 ≤2、纯数字分组 ≥2 且 ≥6 位、链长/条数有上限）+ `finalize_ocr_text` 统一收口（**原文一字不改**、变体以〔OCR数字校正〕行追加正文尾部，正确号码与误识形态均可 trigram 命中）；两 OCR 引擎（WinRT/Tesseract）+ 扫描 PDF 逐页管线自动共享。indexer 182（+5：真机 case 四连 / 保守反例 / doc_db FTS e2e）全过、依赖面 local-index/desktop/server 零回归、clippy/fmt 净。**生效条件**：随下次发版；存量图片 mtime skip 需清空索引重建；locifindd 下次构建须重编（indexer 变更）。
+**2026-07-07（最新）**：**BETA-51 设置统一入口 + BETA-52 语义模型管理增强**（v0.9.18 发版后真机反馈两问题 + 拍板补自动发现，随 v0.9.19 一起发）。**51**：「我的同义词」`/synonyms`、「隐私与数据」`/privacy` 两独立整页进入后无关闭/返回入口 → 整体收编进选项对话框——`SynonymsPane` 内联「杂项」tab、`PrivacyPane` 折叠完整隐私内容（索引概览/数据位置/一键清除/卸载清理），删两路由与两页文件、工具菜单改开对应 tab（`open-prefs-misc`/`open-prefs-privacy`）。**52**：`EmbedStatus::Ready` 携 `active_path`（状态行显示「当前模型：xxx.gguf」）+ 新命令 `probe_model_file`（检测按钮：存在/gguf/体积，不加载）+ 新命令 `discover_gguf_models`（everything crate 新 `find_files_by_extension`、`ext:gguf` 全盘发现）+「扫描本机 gguf 模型」列表每项「设为语义/生成」回填路径覆盖并自动检测——**只回填不复制不加载**（错架构误载可能 crash、交用户判断+检测+重启验真），为切换更强本地/局域网可信模型铺路。验证：tsc/vite/clippy `-D warnings`（修 `unnecessary_sort_by`）/171 desktop 测试 全绿。**本机工具链确认可用**（vcvars + 入仓 libclang）、非 llama 门控改动跑无 feature `cargo check/clippy` ~1.5min 即验。
 
 ## 下一步
 
 1. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
-2. **BETA-33 cycle 9 真机验证**：随下次发版装机，按 [manual-test-scenarios](docs/manual-test-scenarios.md) 跑六场景；本轮验证面另含 BETA-43（出处/`read_document`/审计导出，[playbooks README](docs/playbooks/README.md) 第 8/9 条）+ **BETA-12 卸载清理**（场景 5「升级零数据损失」为发版阻断；NSIS hook 首次真实构建即本次发版 CI）+ **BETA-29 意图草稿 v1（6 场景）+ v2（7 场景）**+ **BETA-47 选项页**（七 tab / Everything 检测两态 / 开关关闭后音乐发现回退 + 重启后 Everything 臂消失）+ **BETA-49 音乐发现不越界**（仅生效目录内音频入库）+ **BETA-50 OCR 数字校正**（新版装机后清空索引重建、搜 `150138` 应命中准考证 PNG）。
-3. **v0.9.15 发版 done（并发首版）**：windows+macos 双 workflow 同 tag 并发均 success，[Release](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.15) 含 exe + DMG（aarch64）+ changelog；macOS DMG CI 首验通过。用户真机测试进行中；**BETA-45/46 改动未随包**、待下次发版验证。
+2. **BETA-33 cycle 9 真机验证**：随下次发版装机，按 [manual-test-scenarios](docs/manual-test-scenarios.md) 跑六场景；本轮验证面另含 BETA-43（出处/`read_document`/审计导出，[playbooks README](docs/playbooks/README.md) 第 8/9 条）+ **BETA-12 卸载清理**（场景 5「升级零数据损失」为发版阻断；NSIS hook 首次真实构建即本次发版 CI）+ **BETA-29 意图草稿 v1（6 场景）+ v2（7 场景）**+ **BETA-47 选项页**（七 tab / Everything 检测两态 / 开关关闭后音乐发现回退 + 重启后 Everything 臂消失）+ **BETA-49 音乐发现不越界**（仅生效目录内音频入库）+ **BETA-50 OCR 数字校正**（新版装机后清空索引重建、搜 `150138` 应命中准考证 PNG）+ **BETA-51 设置统一**（同义词/隐私从菜单进出可正常返回搜索）+ **BETA-52 模型管理**（语义状态显示当前模型 / 路径「检测」/「扫描本机 gguf」自动发现列表 + 设为语义·生成）。
+3. **发版进度**：**v0.9.18**（BETA-47/48/49/50）+ **v0.9.19**（BETA-51/52）双平台各 success、changelog 齐（[v0.9.19](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.19)）；并发机制累计稳。用户真机测试进行中。
 4. **BETA-10 剩余**：macOS DMG 产物 CI done 且 **v0.9.15 首验通过**；剩 macOS 真机放行验证（§6.3）；winget 待 BETA-14 后 / Homebrew tap 可启动（DMG CI 已跑通）。
 5. **BETA-40 真实内网证据**：唯一剩余验收项，依赖 ①。
 6. **剩余 6 条 partial**（不阻塞出场线，[beta-exit §3.4](docs/reviews/beta-exit.md)）：全为 v0.5 标注锁定项（markdown ft / 「上个月下载的」动词歧义 / 项目归档 location / downloads hint 双语 ×2，改标注吃 §6.5 豁免额度）+ 备份文件两难。parser 可确定性收割已见底。
@@ -37,6 +37,14 @@
 ## 会话日志
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
+
+### 2026-07-07 — Claude Code (Opus 4.8) — 选项设置统一 + 语义模型状态/检测/自动发现 + v0.9.18/19 双发版
+
+**承接**：用户问「本会话该做什么」→ 判定 BETA-47/48/49/50 code-done 未随包、发 **v0.9.18**；随后真机反馈两问题（同义词整页无返回入口 / 语义召回看不到当前模型），拍板补自动发现后一起发 **v0.9.19**。
+**产出**：**BETA-51 设置统一入口**——「我的同义词」「隐私与数据」两独立整页收编进选项对话框 tab（`SynonymsPane` 内联杂项、`PrivacyPane` 折叠完整隐私内容），删 `/synonyms`·`/privacy` 路由与两页文件、工具菜单改开对应 tab；**BETA-52 语义模型管理增强**——`EmbedStatus::Ready` 带 `active_path`（显示当前模型）+ `probe_model_file`「检测」按钮 + `discover_gguf_models`「扫描本机 gguf」自动发现（everything `find_files_by_extension`、每项设为语义/生成回填路径、只填不复制不加载）。
+**关键记录**：本机工具链确认可用（vcvars + 入仓 libclang），非 llama 门控改动跑无 feature `cargo check/clippy` ~1.5min 即验证（旧 memory「本机无 linker」作废、已更正）。
+**结果**：tsc/vite/clippy `-D warnings`（修 `unnecessary_sort_by`）/171 desktop 测试 全绿；v0.9.18 + v0.9.19 双平台各 success、changelog 齐。
+**未尽事宜**：v0.9.18/19 随真机验证（设置统一返回 / 模型检测·自动发现 / OCR 数字校正 等）。
 
 ### 2026-07-06 VI — Claude Code (Fable 5) — BETA-50 OCR 数字校正（真机准考证误识诊断 + 沉淀）
 
@@ -67,11 +75,3 @@
 **产出**：下载卡死链修复四刀（select 取消竞速〔连接阶段即刻生效〕+ connect_timeout 15s + hf-mirror 镜像兜底〔PRIVACY 同步〕+ model_download_in_flight 前端恢复下载态）；取消误报失败修复（invoke-catch 补过滤）；目录三行卡片布局（路径/统计/按钮分行）。BETA-45 真机首验：发现 UI 工作（Everything 命中 artifacts 模型）。
 **结果**：desktop 170 全过、tsc/vite/clippy/fmt 净；[Release v0.9.17](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.17) exe+DMG 齐。
 **未尽事宜**：v0.9.17 待用户验证（取消即刻生效/镜像/三行布局/卸载保模型弹窗/零索引空态/升级零损失）；`gh run watch` 假退出 ×3 → 一律 --json 轮询。详录 → [session-details-2026-07.md](docs/session-logs/session-details-2026-07.md)。
-
-### 2026-07-06 II — Claude Code (Fable 5) — v0.9.15 并发发版 + cycle 9 真机反馈落地（BETA-45/46）
-
-**承接**：用户拍板 push + 并发发版 → 真机测 v0.9.15 → 回报三条反馈 → 三项拍板后当场实现 ①②、③登记下会话。
-**发版**：v0.9.15 双平台并发**双 success**——macOS DMG CI 首验通过（aarch64 DMG 产出）、并发同 Release 幂等追加成立；changelog 补全。踩坑：`gh run watch` 假退出 ×2，改 `--json status` 轮询。
-**产出**：**BETA-45** 模型本地发现 + 卸载默认保模型（NSIS `/SD IDNO` + 同卷 Rename 暂存；everything `find_files_named`〔wfn: 精确名 + UTF-8 导出〕；discover/import 命令 + 白名单 + 原子落盘 + 复用下载 done event；ModelDownloadStep 发现 UI）；**BETA-46** 默认零索引（`resolve_index_roots_tagged` 三夹仅勾选纳入、空+false=零索引）+ checkbox 常显 + banner 退役 + 路径完整显示；**BETA-47** 选项页重构登记（ROADMAP 新 B8 小节）。
-**结果**：desktop 168 / everything 15 / settings 四分支 / uninstall 闸门（+2 断言）全绿；tsc/vite/clippy `-D warnings`/fmt 净。根因诊断：反馈① = BETA-12 整目录删含模型；反馈② = 空 roots 兜底三夹旧语义。
-**未尽事宜**：BETA-45/46 随下次发版真机验证（NSIS 弹窗须真装真卸）；升级行为变化（空 roots 老装机停索三夹）随 cycle 9 复测确认；BETA-47 下会话。详录 → [session-details-2026-07.md](docs/session-logs/session-details-2026-07.md)。
