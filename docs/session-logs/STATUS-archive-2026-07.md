@@ -5,6 +5,14 @@
 > 后续会话的详录写入 session-details-YYYY-MM.md、溢出摘要滚动追加到本文件。
 
 ---
+### 2026-07-06 IV — Claude Code (Fable 5) — BETA-47 选项页重构（七 tab + Everything 开关 + 拆文件）
+
+**承接**：用户问「本次会话该做什么」→ 判定 BETA-47 为唯一标注「下会话」的主卡 → 用户拍板直接开工。
+**产出**：① `enable_everything` 设置 + 三处 es.exe 门控（搜索后端条件注册〔重启生效〕/ 音乐全盘发现〔live、关闭回退目录扫描〕/ 模型本地发现〔live〕）+ `check_everything_available` 检测命令（与开关独立、非 Windows shim 恒 false）；② 七 tab（常规/索引/Everything/语义召回/Windows/隐私与记录/杂项，平台 tab 仅 Windows 显示；模型管理从常规迁入语义召回）；③ PreferencesDialog 1579→513 行、面板拆 `preferences/` 九文件。
+**结果**：desktop 171（+1）/ local-index 24（+1，phase 级回归测试）全过；tsc/vite/clippy/fmt 净。
+**未尽事宜**：BETA-47 真机验证随下次发版；顺带发现两条——**BETA-48**（前端 AppSettings 缺 `embedding_model_path`，UI 保存冲掉手工值，已登 ROADMAP B8）+ Everything 全盘发现 vs 零索引语义张力（进 Class B 待拍板）。
+
+---
 ### 2026-07-06 III — Claude Code (Fable 5) — v0.9.16/17 双发版 + 真机反馈二轮修复
 
 **承接**：用户拍板发 v0.9.16 → 装机实测回报下载卡死链等 → 逐条修复攒批 → 拍板发 v0.9.17。
