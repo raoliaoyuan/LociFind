@@ -4,7 +4,9 @@
 //!
 //! 1. **fixture 完整性（常跑 CI）**——queries.tsv 可解析、期望路径真实存在于
 //!    materials root、期望内容落在该 subject 授权 collection 的 root 之内
-//!    （否则 case 结构性不可能通过）、三场景与越权负样本覆盖齐。
+//!    （否则 case 结构性不可能通过）、三场景与越权负样本覆盖齐、**每个声明的
+//!    collection 都被至少一条 case 演练**（无死 collection）、**每条越权负样本的
+//!    墙目标非空洞**（真实存在 + 落在某未授权 collection 内，杜绝假绿越权断言）。
 //! 2. **端到端（环境变量门控）**——`LOCIFIND_DAEMON_BIN` + `LOCIFIND_MODEL_PATH`
 //!    都给时跑 `enterprise_scenarios` binary 全量（真模型 + 真 daemon），退 0 且
 //!    报告含 OVERALL；CI 无 GGUF / 无 llama-cpp daemon 时自动跳过（与
@@ -47,7 +49,7 @@ fn queries_tsv_parses_and_covers_three_scenarios_with_denied_cases() {
     }
     let denied = cases
         .iter()
-        .filter(|c| matches!(c.expectation, Expectation::AccessDenied))
+        .filter(|c| matches!(c.expectation, Expectation::AccessDenied { .. }))
         .count();
     assert!(
         denied >= 3,
@@ -98,6 +100,70 @@ fn expected_paths_fall_within_subject_granted_collections() {
                 case.subject
             );
         }
+    }
+}
+
+/// 每个声明的 collection 都必须被至少一条 case 实际演练——正样本期望路径落在其
+/// root 内，或某条越权 case 的墙目标（`denied_target`）指向它。否则是「死
+/// collection」：声明了 ACL 边界却无任何 case 触达，回归时信息墙静默失守也测不出来。
+#[test]
+fn every_declared_collection_is_exercised_by_a_case() {
+    let cases = load_repo_cases();
+    for (id, _kind, rel_root, _display) in COLLECTIONS {
+        let prefix = format!("{rel_root}/");
+        let covered = cases.iter().any(|c| match &c.expectation {
+            Expectation::Hits(paths) => paths.iter().any(|p| p.starts_with(prefix.as_str())),
+            Expectation::AccessDenied { target } => target
+                .as_deref()
+                .is_some_and(|t| t.starts_with(prefix.as_str())),
+        });
+        assert!(
+            covered,
+            "collection {id}（root {rel_root}）无任何 case 演练——死 collection（正样本落在其内或越权墙目标指向它，二者至少居一）"
+        );
+    }
+}
+
+/// 每条越权负样本必须声明一个「非空洞」的墙目标：真实存在、落在某声明 collection
+/// 内、且该 collection 不在该 subject 的授权集里。缺目标 = 墙背后可能根本没内容、
+/// 检索本就零命中，「被拒」名不副实；目标落在自己授权集里 = fixture 自相矛盾
+/// （既授权又期望拒绝）。这两类都让越权断言退化成假绿。
+#[test]
+fn denied_cases_declare_nonvacuous_unauthorized_targets() {
+    let root = materials_root();
+    for case in load_repo_cases() {
+        let Expectation::AccessDenied { target } = &case.expectation else {
+            continue;
+        };
+        let target = target.as_deref().unwrap_or_else(|| {
+            panic!(
+                "越权 case {}: 未声明墙目标（expected_paths 应为 ACCESS_DENIED:<相对路径>）",
+                case.id
+            )
+        });
+        let full = root.join(target.replace('/', std::path::MAIN_SEPARATOR_STR));
+        assert!(
+            full.is_file(),
+            "越权 case {}: 墙目标不存在于磁盘：{}",
+            case.id,
+            full.display()
+        );
+        let owner = COLLECTIONS
+            .iter()
+            .find(|(_, _, rel_root, _)| target.starts_with(&format!("{rel_root}/")))
+            .unwrap_or_else(|| {
+                panic!(
+                    "越权 case {}: 墙目标 {target} 不落在任何声明 collection 内",
+                    case.id
+                )
+            });
+        let (owner_id, ..) = owner;
+        assert!(
+            !grants_for_subject(&case.subject).contains(owner_id),
+            "越权 case {}: 墙目标 {target} 落在 subject {} 已授权的 collection {owner_id} 内——不是真墙",
+            case.id,
+            case.subject
+        );
     }
 }
 

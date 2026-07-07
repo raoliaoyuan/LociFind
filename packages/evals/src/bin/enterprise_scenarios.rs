@@ -203,7 +203,7 @@ async fn run_all_cases(
             search_default(&client, &session, &case.query, topk, &case.id).await?;
         let outcome = match &case.expectation {
             Expectation::Hits(_) => score_hits(case, &paths, degraded),
-            Expectation::AccessDenied => {
+            Expectation::AccessDenied { .. } => {
                 let failures = probe_denied(&client, &session, case).await?;
                 score_denied(case, &collections, paths.len(), &failures, degraded)
             }

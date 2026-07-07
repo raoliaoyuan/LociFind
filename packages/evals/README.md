@@ -87,8 +87,10 @@ cargo run -p locifind-evals --bin semantic_quality -- --fixture-set enterprise
 ## 企业三场景 daemon 端到端评测 (BETA-40)
 
 真 `locifindd`（collection 模式 + per-subject token 信息墙）+ 真实 GGUF embedder 的端到端回归：
-22 case（律所 7 / 审计 6 / 离职 9，含 3 条 `ACCESS_DENIED` 越权负样本 + 1 条图片 OCR 语义
-case O-09），语料 = `test-materials/enterprise-scenarios-raw/`，期望集 = 其下 `expected/queries.tsv`。
+53 case（律所 18 / 审计 16 / 离职 19，含 11 条越权负样本 + 图片 OCR 语义 case O-09），
+语料 = `test-materials/enterprise-scenarios-raw/`，期望集 = 其下 `expected/queries.tsv`。
+`expected_paths` 列：正样本为分号分隔相对路径；越权负样本写
+`ACCESS_DENIED:<墙目标相对路径>`（声明该 subject 无权触达的真实内容，供闸门校验墙非空洞）。
 
 ```bash
 # fixture 完整性门（常跑 CI，无需模型）
@@ -102,6 +104,7 @@ cargo run -p locifind-evals --bin enterprise_scenarios -- \
 
 - 评测语义 / baseline（2026-07-04 全 22/22，daemon 图片语义默认开）/ 权重 A/B 结论：[docs/reviews/beta-40-enterprise-eval-2026-07-04.md](../../docs/reviews/beta-40-enterprise-eval-2026-07-04.md)。
 - 设 `LOCIFIND_DAEMON_BIN` + `LOCIFIND_MODEL_PATH` 后 `enterprise_scenarios_gate` 的端到端用例自动启用（否则 skip）。
+- `enterprise_scenarios_gate` 的离线断言（无需模型常跑）除路径存在 / 授权 root 归属外，另含两道防假绿护栏：**每个声明 collection 都被 ≥1 case 演练**（无死 collection）+ **每条越权墙目标非空洞**（真实存在且落在未授权 collection 内）。
 
 ## 同义词召回评测 (BETA-15A)
 

@@ -8,13 +8,13 @@
 
 - **阶段**：B（Beta）进行中（最新发版 **v0.9.19**）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**BETA-51/52 done（代码层，已随 v0.9.19 发版）**——设置统一入口（51：同义词/隐私两独立整页收编进选项 tab，修「设置整页无返回入口」）；语义召回模型管理增强（52：显示当前模型 + 检测按钮 + 自动发现本机 gguf 一键设为语义/生成）。BETA-47/48/49/50 已随 v0.9.18 发版。
+- **当前 task**：**enterprise 闸门加固 done（代码层，未发版；纯 evals/fixture）**——`enterprise_scenarios_gate` 新增两条常跑离线断言（每声明 collection 有 ≥1 case 演练〔无死 collection〕+ 每条越权墙目标非空洞〔真实存在且落未授权 collection 内〕），queries.tsv 11 条越权补机读墙目标（`ACCESS_DENIED:<路径>`）。BETA-44 合成扩容此前已 done（53 case、真机 53/53）、BETA-51/52 已随 v0.9.19 发版。
 - **下一步 top-3**：① v0.9.18/19 真机验证（设置统一返回 / 模型检测·自动发现 / OCR 数字校正 + 上一轮的下载取消·镜像·卸载保模型·零索引等）；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ 双平台真机复跑填 [beta-exit.md](docs/reviews/beta-exit.md) TODO 格。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（音乐全盘发现语义 2026-07-06 方案 A〔按 roots 过滤〕拍板并落地）。
 
 ## 当前 Task
 
-**2026-07-07（最新）**：**BETA-51 设置统一入口 + BETA-52 语义模型管理增强**（v0.9.18 发版后真机反馈两问题 + 拍板补自动发现，随 v0.9.19 一起发）。**51**：「我的同义词」`/synonyms`、「隐私与数据」`/privacy` 两独立整页进入后无关闭/返回入口 → 整体收编进选项对话框——`SynonymsPane` 内联「杂项」tab、`PrivacyPane` 折叠完整隐私内容（索引概览/数据位置/一键清除/卸载清理），删两路由与两页文件、工具菜单改开对应 tab（`open-prefs-misc`/`open-prefs-privacy`）。**52**：`EmbedStatus::Ready` 携 `active_path`（状态行显示「当前模型：xxx.gguf」）+ 新命令 `probe_model_file`（检测按钮：存在/gguf/体积，不加载）+ 新命令 `discover_gguf_models`（everything crate 新 `find_files_by_extension`、`ext:gguf` 全盘发现）+「扫描本机 gguf 模型」列表每项「设为语义/生成」回填路径覆盖并自动检测——**只回填不复制不加载**（错架构误载可能 crash、交用户判断+检测+重启验真），为切换更强本地/局域网可信模型铺路。验证：tsc/vite/clippy `-D warnings`（修 `unnecessary_sort_by`）/171 desktop 测试 全绿。**本机工具链确认可用**（vcvars + 入仓 libclang）、非 llama 门控改动跑无 feature `cargo check/clippy` ~1.5min 即验。
+**2026-07-07 II（最新）**：**enterprise 评测闸门加固**（BETA-44 合成扩容已 done、转做闸门防假绿；纯 evals/fixture、未发版）。判定 BETA-44 卡片 done（53 case、2026-07-04 真机 53/53），新 case 无法本机验真、卡片明确反对凑数 → 加固离线闸门。**改动**：① `enterprise.rs` `Expectation::AccessDenied` 改带可选墙目标 `{ target }` + parser 支持 `ACCESS_DENIED:<相对路径>`（裸标记仍兼容、空/畸形报错），运行期不消费该字段（越权探针语义 byte 不变、真机 `--require-all` 零回归）；② queries.tsv 11 条越权补墙目标（各指向真实存在、subject 未授权 collection 内的文件，含此前仅作墙的 `audit-2025-facilities`/`offboarding-other-tech`）；③ `enterprise_scenarios_gate` 两条常跑离线断言——**每声明 collection 被 ≥1 case 演练**（无死 collection）+ **每条越权墙目标非空洞**；④ evals/README 校正陈旧「22 case/3 越权」→ 53/11 + 补 TSV 格式。**意义**：把"信息墙有没有真被测到"从人工审阅变成常跑 CI 机器可查、不依赖真机/模型（CONVENTIONS §3「踩坑→闸门」）。验证：lib 67 pass（含新单测）/ gate 6 pass（含 2 新断言，e2e 无环境变量自跳过）/ clippy `-D warnings` 净 / fmt 净。
 
 ## 下一步
 
@@ -37,6 +37,14 @@
 ## 会话日志
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
+
+### 2026-07-07 II — Claude Code (Opus 4.8) — enterprise 评测闸门加固（防假绿越权断言）
+
+**承接**：用户问「本会话该做什么」→ 判定代码线已随 v0.9.19 追平、剩余主线卡真机验证 + 设计伙伴（均需用户）；选 BETA-44 eval 扩容后核实**卡片早已 done**（53 case、真机 53/53）+ 新 case 无法本机验真 + 卡片反对凑数 → 改向加固离线闸门。
+**关键决策**：不再造合成 case；把越权负样本从"裸 `ACCESS_DENIED`"升级为"带机读墙目标"，让"信息墙真被测到"成为常跑 CI 可查（不依赖真机/模型）。
+**产出**：`enterprise.rs` `Expectation::AccessDenied{target}` + parser `ACCESS_DENIED:<路径>`（运行期不消费、真机 `--require-all` 零回归）；queries.tsv 11 条越权补非空洞墙目标；`enterprise_scenarios_gate` +2 断言（无死 collection + 墙目标非空洞）；evals/README 校正 22→53 计数 + TSV 格式。
+**结果**：lib 67 / gate 6（含 2 新断言）pass、clippy `-D warnings`/fmt 净。
+**未尽事宜**：本轮纯 evals/fixture 不影响发版；真机验证清单不变（v0.9.18/19 六场景仍待用户）。
 
 ### 2026-07-07 — Claude Code (Opus 4.8) — 选项设置统一 + 语义模型状态/检测/自动发现 + v0.9.18/19 双发版
 
@@ -67,11 +75,3 @@
 **产出**：① `enable_everything` 设置 + 三处 es.exe 门控（搜索后端条件注册〔重启生效〕/ 音乐全盘发现〔live、关闭回退目录扫描〕/ 模型本地发现〔live〕）+ `check_everything_available` 检测命令（与开关独立、非 Windows shim 恒 false）；② 七 tab（常规/索引/Everything/语义召回/Windows/隐私与记录/杂项，平台 tab 仅 Windows 显示；模型管理从常规迁入语义召回）；③ PreferencesDialog 1579→513 行、面板拆 `preferences/` 九文件。
 **结果**：desktop 171（+1）/ local-index 24（+1，phase 级回归测试）全过；tsc/vite/clippy/fmt 净。
 **未尽事宜**：BETA-47 真机验证随下次发版；顺带发现两条——**BETA-48**（前端 AppSettings 缺 `embedding_model_path`，UI 保存冲掉手工值，已登 ROADMAP B8）+ Everything 全盘发现 vs 零索引语义张力（进 Class B 待拍板）。
-
-### 2026-07-06 III — Claude Code (Fable 5) — v0.9.16/17 双发版 + 真机反馈二轮修复
-
-**承接**：用户拍板发 v0.9.16 → 装机实测回报下载卡死链等 → 逐条修复攒批 → 拍板发 v0.9.17。
-**发版**：v0.9.16 macOS 首跑 E0433（target-gated 依赖坑）→ shim 修复 + dispatch 重跑 success；v0.9.17 双平台一次 success，并发机制三连稳。changelog 均补全。
-**产出**：下载卡死链修复四刀（select 取消竞速〔连接阶段即刻生效〕+ connect_timeout 15s + hf-mirror 镜像兜底〔PRIVACY 同步〕+ model_download_in_flight 前端恢复下载态）；取消误报失败修复（invoke-catch 补过滤）；目录三行卡片布局（路径/统计/按钮分行）。BETA-45 真机首验：发现 UI 工作（Everything 命中 artifacts 模型）。
-**结果**：desktop 170 全过、tsc/vite/clippy/fmt 净；[Release v0.9.17](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.17) exe+DMG 齐。
-**未尽事宜**：v0.9.17 待用户验证（取消即刻生效/镜像/三行布局/卸载保模型弹窗/零索引空态/升级零损失）；`gh run watch` 假退出 ×3 → 一律 --json 轮询。详录 → [session-details-2026-07.md](docs/session-logs/session-details-2026-07.md)。

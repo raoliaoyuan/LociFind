@@ -3,7 +3,9 @@
 //! 数据源是 [`test-materials/enterprise-scenarios-raw/expected/queries.tsv`]
 //! （BETA-41 扩展材料附带的 query 期望集）：每行一个 case，`subject` 决定用哪枚
 //! bearer token 查询（信息墙语义），`expected_paths` 为分号分隔的相对路径
-//! （相对 materials root）或 `ACCESS_DENIED` 负样本标记。
+//! （相对 materials root）；越权负样本写 `ACCESS_DENIED`（裸标记）或
+//! `ACCESS_DENIED:<墙目标相对路径>`——后者声明「这道墙背后确有内容、且该 subject
+//! 无权触达」，供离线闸门校验负样本非空洞（详 `tests/enterprise_scenarios_gate.rs`）。
 //!
 //! 本模块只放**纯逻辑**（TSV 解析 / 命中评分 / daemon TOML config 生成 / 报告
 //! 渲染），好让 CI 不依赖真模型也能单测；async 编排（spawn daemon + MCP 调用）
@@ -104,7 +106,11 @@ pub enum Expectation {
     /// 全部相对路径（`/` 分隔、相对 materials root）需出现在 top-K。
     Hits(Vec<String>),
     /// 越权负样本：缺省检索不得泄漏未授权集合内容；显式指名未授权集合须报错。
-    AccessDenied,
+    ///
+    /// `target` 为可选的「墙目标」相对路径——该 subject 试图（且必须失败）触达的
+    /// 真实内容。声明它可让离线闸门校验负样本非空洞（目标真实存在 + 落在某未授权
+    /// collection 内），运行期不消费该字段（越权探针恒扫全部未授权 collection）。
+    AccessDenied { target: Option<String> },
 }
 
 /// 解析 queries.tsv 全文。首行是表头（`id\tscenario\t...`），其余每行 6 列。
@@ -158,8 +164,22 @@ pub fn parse_queries_tsv(text: &str) -> Result<Vec<EnterpriseCase>> {
         if !seen_ids.insert(id.to_owned()) {
             bail!("case id 重复：{id}");
         }
-        let expectation = if expected_raw == ACCESS_DENIED_MARKER {
-            Expectation::AccessDenied
+        let expectation = if let Some(rest) = expected_raw.strip_prefix(ACCESS_DENIED_MARKER) {
+            if rest.is_empty() {
+                Expectation::AccessDenied { target: None }
+            } else if let Some(target) = rest.strip_prefix(':') {
+                let target = target.trim();
+                if target.is_empty() {
+                    bail!("case {id}: {ACCESS_DENIED_MARKER}: 后缺墙目标路径");
+                }
+                Expectation::AccessDenied {
+                    target: Some(target.to_owned()),
+                }
+            } else {
+                bail!(
+                    "case {id}: expected_paths 以 {ACCESS_DENIED_MARKER} 开头但格式非法：{expected_raw:?}"
+                );
+            }
         } else {
             let paths: Vec<String> = expected_raw
                 .split(';')
@@ -460,8 +480,38 @@ mod tests {
         let cases = parse_queries_tsv(TSV_OK).unwrap();
         assert_eq!(cases.len(), 3);
         assert!(matches!(&cases[0].expectation, Expectation::Hits(p) if p.len() == 1));
-        assert!(matches!(&cases[1].expectation, Expectation::AccessDenied));
+        assert!(matches!(
+            &cases[1].expectation,
+            Expectation::AccessDenied { target: None }
+        ));
         assert!(matches!(&cases[2].expectation, Expectation::Hits(p) if p.len() == 2));
+    }
+
+    #[test]
+    fn parse_tsv_denied_target_variants() {
+        // 带墙目标。
+        let with_target = "id\tscenario\tsubject\tquery\texpected_paths\tpurpose\n\
+            L-07\tlawfirm\tli.si\t判决书\tACCESS_DENIED:lawfirm/case-2026-blueharbor/x.txt\t越权\n";
+        let cases = parse_queries_tsv(with_target).unwrap();
+        assert!(matches!(
+            &cases[0].expectation,
+            Expectation::AccessDenied { target: Some(t) } if t == "lawfirm/case-2026-blueharbor/x.txt"
+        ));
+        // 裸标记仍受支持（target=None）。
+        let bare = "id\tscenario\tsubject\tquery\texpected_paths\tpurpose\n\
+            L-07\tlawfirm\tli.si\t判决书\tACCESS_DENIED\t越权\n";
+        assert!(matches!(
+            &parse_queries_tsv(bare).unwrap()[0].expectation,
+            Expectation::AccessDenied { target: None }
+        ));
+        // `ACCESS_DENIED:` 后为空 → 报错。
+        let empty = "id\tscenario\tsubject\tquery\texpected_paths\tpurpose\n\
+            L-07\tlawfirm\tli.si\t判决书\tACCESS_DENIED:\t越权\n";
+        assert!(parse_queries_tsv(empty).is_err());
+        // 以 ACCESS_DENIED 开头但非 `:` 分隔 → 报错（防路径拼写事故被当负样本吞掉）。
+        let malformed = "id\tscenario\tsubject\tquery\texpected_paths\tpurpose\n\
+            L-07\tlawfirm\tli.si\t判决书\tACCESS_DENIED_typo\t越权\n";
+        assert!(parse_queries_tsv(malformed).is_err());
     }
 
     #[test]
@@ -544,7 +594,7 @@ mod tests {
             scenario: "lawfirm".to_owned(),
             subject: "li.si".to_owned(),
             query: "q".to_owned(),
-            expectation: Expectation::AccessDenied,
+            expectation: Expectation::AccessDenied { target: None },
             purpose: String::new(),
         };
         // li.si 只授权 case-2026-northfield。
