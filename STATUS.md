@@ -8,8 +8,8 @@
 
 - **阶段**：B（Beta）进行中（最新发版 **v0.9.19**）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**桌面「本机 MCP 服务」BETA-53 S2/S3 code-done**——接 S1 只读挂载地基：server 加 `personal_local` 多 root 构造器 + `serve_bound`（真 socket 起停集成测试）；桌面 `mcp_service.rs` 四命令（`start/stop_mcp_service`/`mcp_service_status`/`reset_mcp_token`）复用桌面 embedder + 只读挂载 index.db、`127.0.0.1:8766`+随机 token+自启+持久化；前端 `McpPane.tsx`（开关/token 复制/配置片段/重置/安全提示）+ 工具菜单入口。验证 server 93 / desktop 174 / clippy·fmt·tsc+vite 全绿。剩真机（带 semantic-recall 构建 + Claude Code 实连 round-trip）。[设计](docs/reviews/desktop-local-mcp-service-design.md)。
-- **下一步 top-3**：① **BETA-53 真机验证**（带 `semantic-recall` 构建启动 app → 开关 → Claude Code 实连跑 `search`/`read_document` round-trip；依赖用户）；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ **macOS 真机整体待跑**（出场线 Class A 唯一剩项；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）。
+- **当前 task**：**桌面「本机 MCP 服务」BETA-53 S2/S3 code-done**——接 S1 只读挂载地基：server 加 `personal_local` 多 root 构造器 + `serve_bound`（真 socket 起停集成测试）；桌面 `mcp_service.rs` 四命令（`start/stop_mcp_service`/`mcp_service_status`/`reset_mcp_token`）复用桌面 embedder + 只读挂载 index.db、`127.0.0.1:8766`+随机 token+自启+持久化；前端 `McpPane.tsx`（开关/token 复制/配置片段/重置/安全提示）+ 工具菜单入口。验证 server 93 / desktop 174 / clippy·fmt·tsc+vite 全绿。**功能级 round-trip 已验**（真实 index.db 拷贝：只绑 127.0.0.1·token 鉴权·三工具·search 命中+read_document·reset，[报告](docs/reviews/beta-53-mcp-service-verify-2026-07-07.md)）。剩 GUI/真 Claude Code/语义路径 B。
+- **下一步 top-3**：① **BETA-53 剩余真机项**（功能 round-trip 已验；剩 GUI 视觉 + 真 Claude Code 实连 + 语义命中〔`semantic-recall` 构建〕，[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）；② 设计伙伴/首个真实部署主动获取（护城河 P0）；③ **macOS 真机整体待跑**（出场线 Class A 唯一剩项；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（音乐全盘发现语义 2026-07-06 方案 A〔按 roots 过滤〕拍板并落地）。
 
 ## 当前 Task
@@ -18,7 +18,7 @@
 
 ## 下一步
 
-1. **BETA-53 真机验证**（S2/S3 code-done）：带 `semantic-recall` feature 构建桌面 app → 选项页「本机 MCP 服务」开关启用 → 复制配置片段进 Claude Code `~/.claude/settings.json` → 实连跑 `search` / `read_document` round-trip 验证语义命中 + 出处；核对只绑 127.0.0.1、token 鉴权、重置踢连接——照 [验证 playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)（[设计](docs/reviews/desktop-local-mcp-service-design.md)）。
+1. **BETA-53 剩余真机项**（功能级 round-trip 已验，[报告](docs/reviews/beta-53-mcp-service-verify-2026-07-07.md)：真实 index.db 拷贝跑通 §2/§3/§4——只绑 127.0.0.1·无/错 token 401·三工具·真实 search 命中+read_document·reset 停+轮换）：剩 ① GUI 开关/复制的视觉呈现、② 真 Claude Code 进程实连、③ 语义命中（带 `semantic-recall` 构建路径 B）——照 [playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)。
 2. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
 3. **真机验证剩余项**（Windows 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)：BETA-47/50/51/52/29〔v1+v2〕/33〔单实例锁·设置流〕 + 基础搜索 + BETA-12 卸载·升级）——**Windows 仅剩**：BETA-49 音乐发现不越界（依赖目录配置）、BETA-43 出处/`read_document`/审计导出（[playbooks README](docs/playbooks/README.md) 第 8/9 条，需 daemon + 外部 LLM；**其中 `read_document` 正斜杠 root round-trip bug 本轮已修**）、BETA-33 cycle 9 WSearch 状态条 / 全库-概貌口径差；**macOS 整体待跑**（按 [manual-test-scenarios](docs/manual-test-scenarios.md)）。
 4. **发版进度**：**v0.9.18**（BETA-47/48/49/50）+ **v0.9.19**（BETA-51/52）双平台各 success、changelog 齐（[v0.9.19](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.19)）；并发机制累计稳。**Windows 首轮真机 6 项通过**（[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；macOS 真机待跑。
