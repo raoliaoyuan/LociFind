@@ -61,19 +61,3 @@
 **产出**：[真机验证报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)——**首轮 6 项**：基础搜索回归（50 条/229ms）/ BETA-47 七 tab（Windows 平台 tab 显示）/ BETA-51 设置统一（同义词→杂项 tab、隐私→隐私与记录 tab、返回路径完整）/ BETA-52 模型管理（当前模型显示 + 检测「✓可用·313.3MB」+ 扫描 gguf 全盘 3 份）/ **BETA-50 OCR 数字校正**（搜 `150138` 命中准考证 PNG、命中片段高亮 +【OCR数字校正】追加行）/ BETA-12 卸载·升级零损失（用户手验）。**续验 4 项**（同日 computer-use）：BETA-29 v1（草稿面板字段一致 + 移除 chip 重跑、时间窗保留）+ v2（Shift+Enter 预览「尚未执行搜索」+ 按此条件搜索真执行）/ BETA-33 cycle 9 单实例锁（tasklist 仅 1 进程、既有窗口置前）+ 设置流关闭守卫（脏态提示 + 放弃确认、配置零改动）。
 **未尽事宜**：Windows 仅剩 BETA-49（依赖目录配置）/ BETA-43（需 daemon+LLM）/ BETA-33 WSearch 状态条·口径差（需停服务/造口径差）；**macOS 真机整体待跑**（Class A 出场线剩双平台 evals）。
 
-### 2026-07-07 II — Claude Code (Opus 4.8) — enterprise 评测闸门加固（防假绿越权断言）
-
-**承接**：用户问「本会话该做什么」→ 判定代码线已随 v0.9.19 追平、剩余主线卡真机验证 + 设计伙伴（均需用户）；选 BETA-44 eval 扩容后核实**卡片早已 done**（53 case、真机 53/53）+ 新 case 无法本机验真 + 卡片反对凑数 → 改向加固离线闸门。
-**关键决策**：不再造合成 case；把越权负样本从"裸 `ACCESS_DENIED`"升级为"带机读墙目标"，让"信息墙真被测到"成为常跑 CI 可查（不依赖真机/模型）。
-**产出**：`enterprise.rs` `Expectation::AccessDenied{target}` + parser `ACCESS_DENIED:<路径>`（运行期不消费、真机 `--require-all` 零回归）；queries.tsv 11 条越权补非空洞墙目标；`enterprise_scenarios_gate` +2 断言（无死 collection + 墙目标非空洞）；evals/README 校正 22→53 计数 + TSV 格式。
-**结果**：lib 67 / gate 6（含 2 新断言）pass、clippy `-D warnings`/fmt 净。
-**未尽事宜**：本轮纯 evals/fixture 不影响发版；真机验证清单不变（v0.9.18/19 六场景仍待用户）。
-
-### 2026-07-07 — Claude Code (Opus 4.8) — 选项设置统一 + 语义模型状态/检测/自动发现 + v0.9.18/19 双发版
-
-**承接**：用户问「本会话该做什么」→ 判定 BETA-47/48/49/50 code-done 未随包、发 **v0.9.18**；随后真机反馈两问题（同义词整页无返回入口 / 语义召回看不到当前模型），拍板补自动发现后一起发 **v0.9.19**。
-**产出**：**BETA-51 设置统一入口**——「我的同义词」「隐私与数据」两独立整页收编进选项对话框 tab（`SynonymsPane` 内联杂项、`PrivacyPane` 折叠完整隐私内容），删 `/synonyms`·`/privacy` 路由与两页文件、工具菜单改开对应 tab；**BETA-52 语义模型管理增强**——`EmbedStatus::Ready` 带 `active_path`（显示当前模型）+ `probe_model_file`「检测」按钮 + `discover_gguf_models`「扫描本机 gguf」自动发现（everything `find_files_by_extension`、每项设为语义/生成回填路径、只填不复制不加载）。
-**关键记录**：本机工具链确认可用（vcvars + 入仓 libclang），非 llama 门控改动跑无 feature `cargo check/clippy` ~1.5min 即验证（旧 memory「本机无 linker」作废、已更正）。
-**结果**：tsc/vite/clippy `-D warnings`（修 `unnecessary_sort_by`）/171 desktop 测试 全绿；v0.9.18 + v0.9.19 双平台各 success、changelog 齐。
-**未尽事宜**：v0.9.18/19 随真机验证（设置统一返回 / 模型检测·自动发现 / OCR 数字校正 等）。
-
