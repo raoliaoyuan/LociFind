@@ -863,6 +863,19 @@ pub(crate) fn is_size_shaped(token: &str) -> bool {
     re.is_match(&token.to_lowercase())
 }
 
+/// 标识符级数字串的最短长度：电话前缀（150138=6）/ 身份证（18）/ 邮编（6）皆 ≥6；
+/// 年份（2024=4）/ 日号 / 小数量 < 6。
+const IDENTIFIER_DIGIT_MIN: usize = 6;
+
+/// 纯数字 token 是否为「附带数字」噪声（年份 / 日号 / 小数量）——应从关键词剥离。
+/// 长数字串（≥ [`IDENTIFIER_DIGIT_MIN`]）更可能是电话号 / 案号 / 身份证号等**标识符**，
+/// 保留为字面 keyword（`documents_fts` 是 trigram tokenizer，数字串可子串命中）。
+/// 非纯数字 token 返回 false（交由其它 signal 判据处理）。
+fn is_incidental_number(tok: &str) -> bool {
+    let n = tok.chars().count();
+    n >= 1 && n < IDENTIFIER_DIGIT_MIN && tok.chars().all(|c| c.is_ascii_digit())
+}
+
 fn parse_size_unit(s: &str) -> Option<SizeUnit> {
     match s.to_lowercase().as_str() {
         "b" => Some(SizeUnit::B),
@@ -1832,7 +1845,7 @@ fn extract_en_residual_keywords(input: &str) -> Option<Vec<String>> {
         let is_signal = tok.chars().count() < 2
             || EN_STOPWORDS.contains(&lc)
             || is_size_shaped(tok)
-            || tok.chars().all(|c| c.is_ascii_digit())
+            || is_incidental_number(tok)
             || is_ordinal_day_token(lc)
             || en_is_type_or_location_word(lc)
             || en_part_of_multiword_type_phrase(prev, lc, next);
@@ -2447,6 +2460,63 @@ mod tests {
         // 纯信号词查询（时间+类型）无内容残留段
         let segs = residual_content_segments("上周的pdf");
         assert!(segs.is_empty(), "segs={segs:?}");
+    }
+
+    #[test]
+    fn incidental_number_threshold() {
+        // < 6 位纯数字 = 附带数字（年份 / 日号 / 小数量），剥离。
+        assert!(is_incidental_number("2024"));
+        assert!(is_incidental_number("100"));
+        assert!(is_incidental_number("12"));
+        assert!(is_incidental_number("12345"));
+        // ≥ 6 位 = 标识符（电话前缀 / 身份证 / 邮编），保留。
+        assert!(!is_incidental_number("150138"));
+        assert!(!is_incidental_number("15013866763"));
+        assert!(!is_incidental_number("440307201312314812"));
+        // 非纯数字不归此判据。
+        assert!(!is_incidental_number("a100"));
+        assert!(!is_incidental_number(""));
+    }
+
+    #[test]
+    fn long_digit_run_kept_as_keyword() {
+        // 电话/编号级数字串保留为字面 keyword（trigram 索引可子串命中）。
+        assert_eq!(
+            extract_en_residual_keywords("150138"),
+            Some(vec!["150138".to_owned()])
+        );
+        assert_eq!(
+            extract_en_residual_keywords("15013866763"),
+            Some(vec!["15013866763".to_owned()])
+        );
+        // 内容词 + 号码：相邻非信号 token 合成短语（daemon 的 expand_intent_for_daemon
+        // 再按空格拆成 "invoice" AND "15013866763"，号码仍可检索）。
+        assert_eq!(
+            extract_en_residual_keywords("invoice 15013866763"),
+            Some(vec!["invoice 15013866763".to_owned()])
+        );
+    }
+
+    #[test]
+    fn short_number_still_stripped() {
+        // 年份 / 小数量仍剥离，不进 keyword（守护 date/size 既有行为）。
+        assert_eq!(extract_en_residual_keywords("2024"), None);
+        assert_eq!(extract_en_residual_keywords("100"), None);
+    }
+
+    #[test]
+    fn parse_bare_number_keeps_number_keyword() {
+        use locifind_search_backend::SearchIntent;
+        // 端到端：纯号码查询经 parse 后号码进 keywords（对齐 2026-07-08 真机复现的
+        // 「search 150138 0 命中」修复）。
+        let SearchIntent::FileSearch(fs) = crate::parse("15013866763") else {
+            panic!("纯号码应解析为 FileSearch")
+        };
+        assert_eq!(
+            fs.keywords,
+            Some(vec!["15013866763".to_owned()]),
+            "号码应作为关键词保留"
+        );
     }
 
     #[test]
