@@ -187,7 +187,7 @@ export function McpPane() {
                 重置令牌
               </button>
               <span className="prefs-hint" style={{ marginLeft: "10px" }}>
-                重置会停止服务并作废旧令牌（踢掉已连接的客户端），需重新启用。
+                重置会作废旧令牌并踢掉已连接的客户端；服务运行中则自动以新令牌重启（无需重新启用）。
               </span>
             </div>
           </div>

@@ -257,17 +257,30 @@ impl McpServiceState {
         Ok(self.status_locked(&guard, &settings))
     }
 
-    /// 重置令牌：先停服务（踢掉持旧 token 的连接，设计 §5.2），再生成新 token 持久化。
-    /// 停后 `enabled=false`——用户需重新启用（新 token 生效）。
+    /// 重置令牌：先停服务（踢掉持旧 token 的连接，设计 §5.2），换新 token 持久化，
+    /// **若重置前服务在运行则自动以新 token 重启**——旧 token 再连即 401、新 token 立即 200，
+    /// 免去用户手动重新启用。重置前已停则仅换 token、保持停止态（下次启用即用新 token）。
     ///
     /// # Errors
     ///
-    /// token 生成 / settings 持久化失败时返回 `Err`。
+    /// token 生成 / settings 持久化 / 重启（挂载或绑定）失败时返回 `Err`。
     pub async fn reset_token(&self) -> Result<McpServiceStatus, String> {
+        // 记录重置前的运行态——决定换 token 后是否自动重启。
+        let was_running = self.running.lock().await.is_some();
+
+        // 先停服务：drop listener + 结束 server task，踢掉所有持旧 token 的连接（设计 §5.2）。
         self.stop().await?;
+
+        // 换新 token 并落盘（stop 已把 enabled 置 false；下面若重启会重新置 true）。
         let mut settings = crate::settings::read_settings_or_default(&self.settings_path);
         settings.mcp_service_token = Some(generate_token()?);
         self.persist(&settings)?;
+
+        if was_running {
+            // 原本在跑：自动重启——start() 复用刚落盘的新 token（len≥32 不再重生），新 token 即时生效。
+            return self.start().await;
+        }
+
         let guard = self.running.lock().await;
         Ok(self.status_locked(&guard, &settings))
     }
@@ -366,5 +379,39 @@ mod tests {
         assert_eq!(st.semantic, None);
         assert_eq!(st.url, "http://127.0.0.1:8766/mcp");
         assert_eq!(st.token.as_deref(), Some("t".repeat(64).as_str()));
+    }
+
+    /// 停止态下重置：换出新 token（64 hex，与旧值不同）、落盘、保持 stopped/enabled=false。
+    /// 覆盖 `reset_token` 的「原本已停 → 仅换 token」分支（不绑端口）。
+    #[tokio::test]
+    async fn reset_token_when_stopped_rotates_and_stays_stopped() {
+        let dir = std::env::temp_dir().join(format!("locifind-mcpreset-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("settings.json");
+        let old = "a".repeat(64);
+        std::fs::write(&f, format!(r#"{{"mcp_service_token":"{old}"}}"#)).unwrap();
+
+        let state = McpServiceState::new(
+            Arc::new(crate::search::embedding_model::EmbeddingModelHandle::new(
+                None,
+                PathBuf::from("/tmp/x"),
+            )),
+            PathBuf::from("/tmp/data"),
+            Some(f.clone()),
+        );
+
+        let st = state.reset_token().await.unwrap();
+        assert!(!st.running, "重置后保持停止态");
+        assert!(!st.enabled, "重置后 enabled=false");
+        let new = st.token.expect("重置应生成新 token");
+        assert_eq!(new.len(), 64, "新 token 为 64 hex 字符");
+        assert!(new.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert_ne!(new, old, "新旧 token 不同");
+
+        // 落盘校验：磁盘上的 token = 返回的新 token。
+        let persisted = crate::settings::read_settings_or_default(&Some(f));
+        assert_eq!(persisted.mcp_service_token.as_deref(), Some(new.as_str()));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
