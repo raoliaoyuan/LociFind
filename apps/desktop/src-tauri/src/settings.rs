@@ -609,7 +609,10 @@ mod tests {
 
         // 落盘后：MCP 两字段以磁盘现值为准（保留），无关字段按前端写入。
         let after = read_settings_or_default(&Some(f));
-        assert!(after.mcp_service_enabled, "enabled 不得被表单快照冲成 false");
+        assert!(
+            after.mcp_service_enabled,
+            "enabled 不得被表单快照冲成 false"
+        );
         assert_eq!(
             after.mcp_service_token.as_deref(),
             Some("a".repeat(64).as_str()),
@@ -624,7 +627,8 @@ mod tests {
     /// 直接按前端快照写入（此时 MCP 字段本就是默认值、无可保留）。
     #[test]
     fn update_settings_at_writes_when_no_existing_file() {
-        let dir = std::env::temp_dir().join(format!("locifind-mcpmerge-new-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("locifind-mcpmerge-new-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("settings.json");
         let mut incoming = AppSettings::default();

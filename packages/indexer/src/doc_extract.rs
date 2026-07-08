@@ -659,7 +659,8 @@ mod tests {
         let opts = SimpleFileOptions::default();
         zw.start_file("word/document.xml", opts).unwrap();
         zw.write_all(
-            r"<w:document><w:body><w:p><w:r><w:t>会议纪要</w:t></w:r></w:p></w:body></w:document>".as_bytes(),
+            r"<w:document><w:body><w:p><w:r><w:t>会议纪要</w:t></w:r></w:p></w:body></w:document>"
+                .as_bytes(),
         )
         .unwrap();
         zw.start_file("docProps/core.xml", opts).unwrap();

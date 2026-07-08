@@ -440,7 +440,9 @@ mod tests {
         assert!(!st.enabled, "重置后 enabled=false");
         let new = st.token.expect("重置应生成新 token");
         assert_eq!(new.len(), 64, "新 token 为 64 hex 字符");
-        assert!(new.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(new
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
         assert_ne!(new, old, "新旧 token 不同");
 
         // 落盘校验：磁盘上的 token = 返回的新 token。
