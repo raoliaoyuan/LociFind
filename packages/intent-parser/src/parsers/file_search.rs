@@ -873,7 +873,7 @@ const IDENTIFIER_DIGIT_MIN: usize = 6;
 /// 非纯数字 token 返回 false（交由其它 signal 判据处理）。
 fn is_incidental_number(tok: &str) -> bool {
     let n = tok.chars().count();
-    n >= 1 && n < IDENTIFIER_DIGIT_MIN && tok.chars().all(|c| c.is_ascii_digit())
+    (1..IDENTIFIER_DIGIT_MIN).contains(&n) && tok.chars().all(|c| c.is_ascii_digit())
 }
 
 fn parse_size_unit(s: &str) -> Option<SizeUnit> {
