@@ -2,6 +2,20 @@
 
 > STATUS.md 只放摘要；本文件按月留改动概览、验证输出、决策细节。最新在顶部。
 
+## 2026-07-08 — Claude Code (Opus 4.8) — Codex↔MCP 接线 + BETA-54/55 + v0.9.23 双平台发布
+
+### 弧线
+用户带 Codex 截图问「是否绕过 MCP」→ 排查（详见 memory `codex-locifind-mcp-http-wiring`）实锤 Codex 从没挂上 → 修接线 → 真机暴露 BETA-54（数字检索）+ BETA-55（最后保存者）两 gap → 实现 + 出装机版真机验证 → 三分支收敛 → v0.9.23 双平台发布。
+
+### 分支收敛（三线岔开 → 单一 main）
+`main`（BETA-54 单条 01d0c93）/ `origin/main`（token 两修）/ `release/v0.9.21`（token 两修，另一 v0.9.21 哈希）三线岔开、无分支同时含全部。做法：release/v0.9.21 上 cherry-pick BETA-54→v0.9.22 bump→BETA-55→v0.9.23 bump→cherry-pick origin 独有的 playbook（唯一实质独有内容）；reset 本地 main 到该 tip；`git push --force-with-lease origin main`（origin 只丢内容重复的 v0.9.21 bump，无损）。
+
+### v0.9.23 发版（CI 两轮修 + tag 重指）
+本机 `scripts/build-locifindd-llama.bat` 同款 env（vcvars + 主仓 `.tmp` 的 libclang/llcb 缓存）跑 `tauri build --features model-fallback,semantic-recall -- --locked` 出 Windows 装机版 → 真机经 MCP 验 `15013866` 命中 + author 带最后保存者 → tag v0.9.23。**CI 踩两坑**（本机漏跑）：① clippy `manual_range_contains`（BETA-54 `is_incidental_number` 的 `n>=1 && n<X` → `(1..X).contains(&n)`）；② `cargo fmt --check` 3 处（BETA-55 doc_extract + **token 两修合并进 main 时没过 fmt 的 mcp_service/settings 遗留**，是 origin/main pre-existing 红灯根源）。每轮修后 tag 重指到修复提交（cancel 旧 release 跑 + `git push -f origin v0.9.23`）。**教训：lib crate 本机能跑 clippy/fmt（不需 linker），改完先 `cargo fmt --all -- --check` + `cargo clippy -p <crates> -- -D warnings` 全套，别一个个等 CI**。macOS 首跑 npm ERESOLVE（`@vitejs/plugin-react` peer `vite@undefined`，同代码 Windows 却过——仓库没追踪 package-lock.json 致非确定性，已立 task `task_7d1af996`）→ `gh run rerun --failed` 重跑过。最终双平台 Release 齐（setup.exe + aarch64.dmg + app.tar.gz），main CI 全绿。
+
+### 生效边界真机确认
+BETA-54 查询期修复、装上即生效；BETA-55 需清库重建（存量 mtime skip）。「燎原」2 字 0 命中 = trigram <3 字下限（非 bug），`饶燎原` 3 字命中 → 短 CJK 兜底另立 BETA-56（并发会话已 done，memory `cjk-short-query-trigram-like-fallback`）。
+
 ## 2026-07-08 — Claude Code (Opus 4.8) — 修复本机 MCP 服务 token 持久化分叉
 
 ### 承接

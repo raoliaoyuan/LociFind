@@ -6,22 +6,22 @@
 
 ## 📍 速览
 
-- **阶段**：B（Beta）进行中（最新 **v0.9.23**——发版线在 v0.9.21〔BETA-53 本机 MCP + token 两修〕上依次并入 **BETA-54 数字/编号检索修复** + **BETA-55 索引 Office 最后保存者**〔cp:lastModifiedBy 进 author FTS，支撑审计/离职「谁最后改的」检索〕，待重编真机测）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
+- **阶段**：B（Beta）进行中（最新 **v0.9.23 双平台已发布**——含 BETA-53 本机 MCP + MCP token 两修 + **BETA-54 数字/编号检索** + **BETA-55 索引 Office 最后保存者**〔cp:lastModifiedBy 进 author FTS〕；BETA-54/55 **装机版真机验证达成**〔`15013866` 命中、author 带最后保存者〕）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**2026-07-08 修复本机 MCP 服务 token 持久化分叉**（BETA-53 follow-up）——`update_settings` 全量覆写用旧快照把后端带外写的 token 冲成 null（双写者覆盖，非双数据目录）→ 401 静默失效；修为写盘前合并回磁盘现值的 MCP 两字段，+3 测试，编译验证靠 CI。BETA-53 主体仍 **done**：接 S1 只读挂载地基：server 加 `personal_local` 多 root 构造器 + `serve_bound`（真 socket 起停集成测试）；桌面 `mcp_service.rs` 四命令（`start/stop_mcp_service`/`mcp_service_status`/`reset_mcp_token`）复用桌面 embedder + 只读挂载 index.db、`127.0.0.1:8766`+随机 token+自启+持久化；前端 `McpPane.tsx`（开关/token 复制/配置片段/重置/安全提示）+ 工具菜单入口。验证 server 93 / desktop 174 / clippy·fmt·tsc+vite 全绿。**真机验证达成 → done**（功能 §2/§3/§4 + GUI 全流程 + **语义路径 B**〔`semantic-recall` 构建：`semantic=true` + 中文 query 命中英文文档跨语言召回〕三维均通过，[报告](docs/reviews/beta-53-mcp-service-verify-2026-07-07.md)；仅余可选「真 Claude Code 进程实连」，协议已 curl 验过）。
-- **下一步 top-3**：① **设计伙伴/首个真实部署主动获取**（护城河 P0，ROADMAP §5；BETA-40 真实内网证据/BETA-44 语料扩充均以此为前提）；② **macOS 真机整体待跑**（出场线 Class A 唯一剩项；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；③ BETA-53 可选复核：真 Claude Code 进程连 `~/.claude/settings.json` 走一遍（[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）。
+- **当前 task**：**2026-07-08 Codex 接 MCP 排查 → BETA-54/55 + v0.9.23 双平台发布 done**——用户观察「Codex 绕过 MCP 直连库」实为 Codex 从没挂上（Claude 风格 JSON 没进 Codex TOML；配法修好后现稳走 MCP，途中踩 token 轮换 / MSIX 环境变量需注销重登）。真机暴露并修两 gap：**BETA-54 数字检索**（intent-parser 保留 ≥6 位数字串）+ **BETA-55 索引最后保存者**（`cp:lastModifiedBy` 进 author FTS）。三分支（main BETA-54 / origin token 两修 / release）**收敛为单一 main** + **v0.9.23 双平台发布**（CI 修 clippy `manual_range_contains` + fmt 遗留后全绿）。并发会话另修 MCP token 两 bug（已并 main）+ 短 CJK ≤2 字兜底（BETA-56，memory `cjk-short-query-trigram-like-fallback`）。上一里程碑 BETA-53 本机 MCP 服务 done（v0.9.20）。
+- **下一步 top-3**：① **设计伙伴/首个真实部署主动获取**（护城河 P0，ROADMAP §5；BETA-40 真实内网证据/BETA-44 语料扩充均以此为前提）；② **macOS 真机整体待跑**（出场线 Class A 唯一剩项；**v0.9.23 macOS DMG 已产出、具备真机测试前提**；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；③ BETA-53 可选复核：真 Claude Code 进程连 `~/.claude/settings.json` 走一遍（[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（音乐全盘发现语义 2026-07-06 方案 A〔按 roots 过滤〕拍板并落地）。
 
 ## 当前 Task
 
-**2026-07-08（最新）**：**修复本机 MCP 服务 token 持久化分叉**（BETA-53 follow-up，详见同名会话日志 + [详录](docs/session-logs/session-details-2026-07.md)）。排查 Codex 接 MCP 时的矛盾态——服务在跑并持一个 token、磁盘 settings.json 却显示 `mcp_service_token:null`/`enabled:false`。**根因非双数据目录**（`mcp_service.rs` 与 UI 均用 `settings_file_path` = `app_config_dir/settings.json`，同一文件；`LociFind\` 无 settings.json 本属正常），实为**双写者覆盖**：MCP 开关/token 由后端**带外**写盘，偏好表单 `update_settings` 全量覆写时用弹窗挂载期的旧快照把后端刚写的 token 冲成 null，而运行中 axum server 仍持内存旧 token → 401 静默失效、外部 client 无感退回 grep。**修**：`update_settings` 写盘前先读磁盘现值、合并回 `mcp_service_enabled`/`mcp_service_token`（磁盘成唯一信源、表单永不动这两字段）；`merge_backend_managed_mcp_fields` + 可测 `update_settings_at` 内核。**测试 +3**：settings clobber 回归 / 首存无文件 / mcp_service status↔磁盘 token 一致守卫。本机无 MSVC 工具链，编译/clippy 验证靠 CI；doc_markdown·field_reassign 已按 CI pedantic 核对。未 bump 版本、随下个发版携带。
+**2026-07-08（最新）**：**Codex 接本机 MCP 排查 → BETA-54/55 + v0.9.23 双平台发布**（详见会话日志 + [详录](docs/session-logs/session-details-2026-07.md)）。用户带 Codex 截图问「是不是绕过 MCP 直连库」→ 实锤 **Codex 从没挂上 MCP**（贴的 Claude 风格 `mcpServers` JSON 没进 Codex 的 TOML `[mcp_servers]`），「绕行」= 无工具时自救。修接线（`codex mcp add --url` + `--bearer-token-env-var`），端到端 + audit 铁证验证走 MCP；踩坑 token 轮换 / **MSIX 包吃 setx 新 token 须注销重登**（重启 app/explorer 都不够）。真机暴露两 gap 并修：**BETA-54 数字检索**（`file_search.rs` intent-parser 无条件剥数字 → `is_incidental_number` 保留 ≥6 位；desktop+MCP 共用 `parse` 一改两受益）+ **BETA-55 索引最后保存者**（`doc_extract.rs` `read_core_props` 加抽 `cp:lastModifiedBy` 经 `combine_authors` 并入 author FTS；xlsx 另开 zip 补 core props）。**收敛三分支为单一 main**（main BETA-54 / origin token 两修 / release 线岔开 → cherry-pick playbook + 强推 origin/main）。**v0.9.23 双平台发布**（本机出 Windows 装机版真机验 `15013866` 命中 + author 带最后保存者 → tag → CI 修 clippy `manual_range_contains` + fmt 遗留〔token 两修合并时漏的〕→ 全绿 → Windows setup + macOS DMG〔npm ERESOLVE flake 重跑〕齐发）。测试：intent-parser 242 / indexer doc_extract 25 全绿。派生 task：短 CJK 兜底（done，BETA-56）/ token UX / npm lockfile 发版隐患。
 
 ## 下一步
 
 1. **BETA-53 剩余真机项**（功能级 + 真机 GUI 全流程已验，[报告](docs/reviews/beta-53-mcp-service-verify-2026-07-07.md)：harness 跑通 §2/§3/§4 + computer-use 驱动 dev app 实点——菜单/tab 路由·开关联动后端起停·token/配置片段复制·自启·旧设置迁移·对实跑 app curl 全通过）：**仅剩** ① 真 Claude Code 进程实连（协议已 curl 验过）、② 语义命中（`semantic-recall` 构建路径 B）——均依赖用户。
 2. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
 3. **真机验证剩余项**（Windows 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)：BETA-47/50/51/52/29〔v1+v2〕/33〔单实例锁·设置流〕 + 基础搜索 + BETA-12 卸载·升级）——**Windows 仅剩**：BETA-49 音乐发现不越界（依赖目录配置）、BETA-43 出处/`read_document`/审计导出（[playbooks README](docs/playbooks/README.md) 第 8/9 条，需 daemon + 外部 LLM；**其中 `read_document` 正斜杠 root round-trip bug 本轮已修**）、BETA-33 cycle 9 WSearch 状态条 / 全库-概貌口径差；**macOS 整体待跑**（按 [manual-test-scenarios](docs/manual-test-scenarios.md)）。
-4. **发版进度**：**v0.9.18**（BETA-47/48/49/50）+ **v0.9.19**（BETA-51/52）双平台各 success、changelog 齐（[v0.9.19](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.19)）；**v0.9.20**（BETA-53 本机 MCP 服务）；**v0.9.21**（MCP token 两修：reset 自动重启 + token 持久化分叉，仅桌面）；并发机制累计稳。**Windows 首轮真机 6 项通过**（[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；macOS 真机待跑。
+4. **发版进度**：v0.9.18/19（BETA-47-52）→ **v0.9.20**（BETA-53 本机 MCP）→ **v0.9.21**（MCP token 两修）→ **v0.9.23 双平台已发布**（并入 BETA-54 数字检索 + BETA-55 最后保存者；v0.9.22 为中间态已折入）——[Release](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.23) 含 Windows setup + macOS DMG，CI 全绿。并发机制累计稳。
 5. **BETA-10 剩余**：macOS DMG 产物 CI done 且 **v0.9.15 首验通过**；剩 macOS 真机放行验证（§6.3）；winget 待 BETA-14 后 / Homebrew tap 可启动（DMG CI 已跑通）。
 6. **BETA-40 真实内网证据**：唯一剩余验收项，依赖 ②。
 7. **剩余 6 条 partial**（不阻塞出场线，[beta-exit §3.4](docs/reviews/beta-exit.md)）：全为 v0.5 标注锁定项（markdown ft / 「上个月下载的」动词歧义 / 项目归档 location / downloads hint 双语 ×2，改标注吃 §6.5 豁免额度）+ 备份文件两难。parser 可确定性收割已见底。
@@ -39,18 +39,12 @@
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
 
-### 2026-07-08 — Claude Code (Opus 4.8) — v0.9.23：BETA-55 索引 Office 最后保存者
+### 2026-07-08 — Claude Code (Opus 4.8) — Codex↔MCP 接线 + BETA-54/55 + v0.9.23 双平台发布
 
-**承接**：Codex（已走通 MCP）查「最后保存者为 燎原 的文档」0 命中——查证 `read_core_props` 只抽 `dc:creator`、`cp:lastModifiedBy` 完全没入索引。用户拍板做 BETA-55、在 `release/v0.9.22` 上实现。
-**产出**：`doc_extract.rs` `read_core_props` 加抽 `cp:lastModifiedBy`，经新 `combine_authors`（去重、空格连接）与 creator 合并进 `author` 列（trigram 可搜、零 schema 变更）；xlsx 走 calamine 原不读 core props，新 `read_ooxml_core_props_from_path` 另开 zip 补齐（.xls/.ods 降级 None）。docx/pptx/xlsx 一处覆盖。
-**结果**：indexer doc_extract **25 pass**（新增 combine_authors 单测 + docx 含最后保存者端到端 + 扩 core_props；creator-only 回归零变）；bump v0.9.23。生效需清空索引重建（存量 mtime skip）。
-**注意**：BETA-55 edits 一度误写进 main worktree、已 patch 搬到 `release/v0.9.22` 并还原 main。
-
-### 2026-07-08 — Claude Code (Opus 4.8) — v0.9.22：BETA-54 数字检索并入发版线
-
-**承接**：Codex 接 MCP 真机验证中发现 v0.9.21 桌面 app 号码搜不出（`准考证` 命中但 `15013866` 0 命中）——BETA-54 修复（`main` 上 01d0c93）与 v0.9.21 token 修复线**岔开**，无分支同时含两者。
-**产出**：`release/v0.9.22` = `release/v0.9.21`（token 两修）+ cherry-pick BETA-54（`is_incidental_number`，仅 `file_search.rs` + ROADMAP，代码零冲突、doc 取 release 线基底）；bump tauri.conf.json/Cargo.toml/Cargo.lock → 0.9.22。intent-parser `is_incidental_number` 已在（242 测试此前已验）。
-**待办**：用户从 `release/v0.9.22` 重编桌面 app（token 不变、免重登），真机验 `15013866`/`440307` 命中；决定发不发 tag。`main` 与发版线的最终收敛待定（当前 `main`=BETA-54 单条、`origin/main`/release 线=token 两修）。
+**承接**：用户带 Codex 截图问「是否绕过 MCP」→ 实锤 Codex 从没挂上（Claude JSON 没进 Codex TOML）；修接线后稳走 MCP（详见「当前 Task」）。
+**BETA-54 数字检索**：`file_search.rs` `extract_en_residual_keywords` 无条件剥纯数字 → `is_incidental_number`（<6 位才剥），desktop+MCP 共用 `parse` 一改两受益；242 测试。
+**BETA-55 索引最后保存者**：`doc_extract.rs` `read_core_props` 加抽 `cp:lastModifiedBy` 经 `combine_authors` 并入 author FTS，xlsx 另开 zip 补 core props；doc_extract 25 pass。生效需清空索引重建。
+**发布**：三分支收敛为单一 main（cherry-pick playbook + 强推 origin/main）；本机出 Windows 装机版真机验（`15013866` 命中 / author 带最后保存者）→ **v0.9.23 tag → 双平台发布**；CI 修 clippy `manual_range_contains` + fmt 遗留后全绿，macOS npm ERESOLVE flake 重跑过。派生 task：短 CJK（done BETA-56）/ token UX / npm lockfile。
 
 ### 2026-07-08 — Claude Code (Opus 4.8) — 修复本机 MCP 服务 token 持久化分叉
 
