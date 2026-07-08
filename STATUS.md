@@ -6,7 +6,7 @@
 
 ## 📍 速览
 
-- **阶段**：B（Beta）进行中（最新 **v0.9.23 双平台已发布**——含 BETA-53 本机 MCP + MCP token 两修 + **BETA-54 数字/编号检索** + **BETA-55 索引 Office 最后保存者**〔cp:lastModifiedBy 进 author FTS〕；BETA-54/55 **装机版真机验证达成**〔`15013866` 命中、author 带最后保存者〕）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
+- **阶段**：B（Beta）进行中（最新 **v0.9.23 双平台已发布**——含 BETA-53 本机 MCP + MCP token 两修 + **BETA-54 数字/编号检索** + **BETA-55 索引 Office 最后保存者**〔cp:lastModifiedBy 进 author FTS〕；BETA-54/55 **装机版真机验证达成**〔`15013866` 命中、author 带最后保存者〕；**BETA-56 短 CJK ≤2 字兜底已并入 main、待下个发版**）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
 - **当前 task**：**2026-07-08 Codex 接 MCP 排查 → BETA-54/55 + v0.9.23 双平台发布 done**——用户观察「Codex 绕过 MCP 直连库」实为 Codex 从没挂上（Claude 风格 JSON 没进 Codex TOML；配法修好后现稳走 MCP，途中踩 token 轮换 / MSIX 环境变量需注销重登）。真机暴露并修两 gap：**BETA-54 数字检索**（intent-parser 保留 ≥6 位数字串）+ **BETA-55 索引最后保存者**（`cp:lastModifiedBy` 进 author FTS）。三分支（main BETA-54 / origin token 两修 / release）**收敛为单一 main** + **v0.9.23 双平台发布**（CI 修 clippy `manual_range_contains` + fmt 遗留后全绿）。并发会话另修 MCP token 两 bug（已并 main）+ 短 CJK ≤2 字兜底（BETA-56，memory `cjk-short-query-trigram-like-fallback`）。上一里程碑 BETA-53 本机 MCP 服务 done（v0.9.20）。
 - **下一步 top-3**：① **设计伙伴/首个真实部署主动获取**（护城河 P0，ROADMAP §5；BETA-40 真实内网证据/BETA-44 语料扩充均以此为前提）；② **macOS 真机整体待跑**（出场线 Class A 唯一剩项；**v0.9.23 macOS DMG 已产出、具备真机测试前提**；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；③ BETA-53 可选复核：真 Claude Code 进程连 `~/.claude/settings.json` 走一遍（[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）。
@@ -44,7 +44,7 @@
 **承接**：用户带 Codex 截图问「是否绕过 MCP」→ 实锤 Codex 从没挂上（Claude JSON 没进 Codex TOML）；修接线后稳走 MCP（详见「当前 Task」）。
 **BETA-54 数字检索**：`file_search.rs` `extract_en_residual_keywords` 无条件剥纯数字 → `is_incidental_number`（<6 位才剥），desktop+MCP 共用 `parse` 一改两受益；242 测试。
 **BETA-55 索引最后保存者**：`doc_extract.rs` `read_core_props` 加抽 `cp:lastModifiedBy` 经 `combine_authors` 并入 author FTS，xlsx 另开 zip 补 core props；doc_extract 25 pass。生效需清空索引重建。
-**发布**：三分支收敛为单一 main（cherry-pick playbook + 强推 origin/main）；本机出 Windows 装机版真机验（`15013866` 命中 / author 带最后保存者）→ **v0.9.23 tag → 双平台发布**；CI 修 clippy `manual_range_contains` + fmt 遗留后全绿，macOS npm ERESOLVE flake 重跑过。派生 task：短 CJK（done BETA-56）/ token UX / npm lockfile。
+**发布**：三分支收敛为单一 main（cherry-pick playbook + 强推 origin/main）；本机出 Windows 装机版真机验（`15013866` 命中 / author 带最后保存者）→ **v0.9.23 tag → 双平台发布**；CI 修 clippy `manual_range_contains` + fmt 遗留后全绿，macOS npm ERESOLVE flake 重跑过。**收尾**：清后台 worktree（2 个已并入的删了）+ **BETA-56 短 CJK 兜底 cherry-pick 并入 main**（indexer +4/local-index +1，本机 fmt/clippy/test 全过；待下个发版）。派生 task：短 CJK（done BETA-56）/ token UX / npm lockfile。
 
 ### 2026-07-08 — Claude Code (Opus 4.8) — 修复本机 MCP 服务 token 持久化分叉
 
