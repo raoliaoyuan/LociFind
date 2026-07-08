@@ -179,7 +179,11 @@ fn read_zip_entry<R: Read + std::io::Seek>(
     Some(s)
 }
 
-/// docProps/core.xml 的 dc:title / dc:creator。
+/// docProps/core.xml 的 `dc:title` / `dc:creator` + `cp:lastModifiedBy`（BETA-55）。
+///
+/// `author` 字段合并「创建者 + 最后保存者」（去重、按序空格连接），两者皆进 FTS `author`
+/// 列可被子串检索——支撑审计取证 / 离职归档场景「谁最后改的这份文件」的检索诉求
+/// （此前只抽 `dc:creator`、`cp:lastModifiedBy` 完全没入索引）。
 fn read_core_props<R: Read + std::io::Seek>(
     zip: &mut zip::ZipArchive<R>,
 ) -> (Option<String>, Option<String>) {
@@ -187,8 +191,38 @@ fn read_core_props<R: Read + std::io::Seek>(
         return (None, None);
     };
     let title = first_element_text(&xml, b"title");
-    let author = first_element_text(&xml, b"creator");
-    (title, author)
+    let creator = first_element_text(&xml, b"creator");
+    let last_modified_by = first_element_text(&xml, b"lastModifiedBy");
+    (title, combine_authors(creator, last_modified_by))
+}
+
+/// 合并创建者与最后保存者为单个 `author` 串（去重、按出现顺序空格连接）；两者皆空 → `None`。
+/// 二者相同（同一人创建并最后保存）时只留一份，避免 FTS 里重复词。
+fn combine_authors(creator: Option<String>, last_modified_by: Option<String>) -> Option<String> {
+    let mut names: Vec<String> = Vec::new();
+    for n in [creator, last_modified_by].into_iter().flatten() {
+        let n = n.trim().to_string();
+        if !n.is_empty() && !names.contains(&n) {
+            names.push(n);
+        }
+    }
+    if names.is_empty() {
+        None
+    } else {
+        Some(names.join(" "))
+    }
+}
+
+/// 从路径按 OOXML zip 读 `docProps/core.xml`（xlsx 走 calamine 不暴露 core props，另开 zip 补）。
+/// 非 zip（老 .xls BIFF）/ 无 core.xml（.ods 用 meta.xml）→ 降级 `(None, None)`，不阻断索引。
+fn read_ooxml_core_props_from_path(path: &Path) -> (Option<String>, Option<String>) {
+    let Ok(file) = fs::File::open(path) else {
+        return (None, None);
+    };
+    let Ok(mut zip) = zip::ZipArchive::new(file) else {
+        return (None, None);
+    };
+    read_core_props(&mut zip)
 }
 
 fn extract_docx(path: &Path) -> Result<Extracted, IndexError> {
@@ -252,7 +286,10 @@ fn extract_spreadsheet(path: &Path) -> Result<Extracted, IndexError> {
         }
     }
     let page_count = u32::try_from(sheet_names.len()).ok();
-    Ok((None, None, body, page_count, Vec::new(), Vec::new()))
+    // BETA-55：xlsx/xlsm 是 OOXML zip，calamine 不给 core props——另开 zip 读 title/author
+    //（含最后保存者）；.xls/.ods 读不到即降级 None。
+    let (title, author) = read_ooxml_core_props_from_path(path);
+    Ok((title, author, body, page_count, Vec::new(), Vec::new()))
 }
 
 // ============================================================
@@ -480,13 +517,47 @@ mod tests {
 
     #[test]
     fn first_element_text_reads_core_props() {
-        let xml = r#"<cp:coreProperties xmlns:dc="x"><dc:title>季度报告</dc:title><dc:creator>张三</dc:creator></cp:coreProperties>"#;
+        let xml = r#"<cp:coreProperties xmlns:cp="c" xmlns:dc="x"><dc:title>季度报告</dc:title><dc:creator>张三</dc:creator><cp:lastModifiedBy>燎原</cp:lastModifiedBy></cp:coreProperties>"#;
         assert_eq!(
             first_element_text(xml, b"title").as_deref(),
             Some("季度报告")
         );
         assert_eq!(first_element_text(xml, b"creator").as_deref(), Some("张三"));
+        // BETA-55：最后保存者 local-name 命中。
+        assert_eq!(
+            first_element_text(xml, b"lastModifiedBy").as_deref(),
+            Some("燎原")
+        );
         assert_eq!(first_element_text(xml, b"subject"), None);
+    }
+
+    #[test]
+    fn combine_authors_dedups_and_joins() {
+        // 创建者 + 最后保存者不同 → 两者皆保留、空格连接（皆可被 FTS 子串命中）。
+        assert_eq!(
+            combine_authors(Some("张三".into()), Some("燎原".into())).as_deref(),
+            Some("张三 燎原")
+        );
+        // 同一人创建并最后保存 → 去重，不重复词。
+        assert_eq!(
+            combine_authors(Some("燎原".into()), Some("燎原".into())).as_deref(),
+            Some("燎原")
+        );
+        // 单侧存在。
+        assert_eq!(
+            combine_authors(Some("张三".into()), None).as_deref(),
+            Some("张三")
+        );
+        assert_eq!(
+            combine_authors(None, Some("燎原".into())).as_deref(),
+            Some("燎原")
+        );
+        // 空白/全空。
+        assert_eq!(
+            combine_authors(Some("  ".into()), Some("燎原".into())).as_deref(),
+            Some("燎原")
+        );
+        assert_eq!(combine_authors(None, None), None);
     }
 
     #[test]
@@ -572,8 +643,36 @@ mod tests {
         let ExtractedDoc { entry, body, .. } = extract_document(&path, 7).unwrap();
         assert_eq!(entry.doc_type, "docx");
         assert_eq!(entry.title.as_deref(), Some("Q1 报告"));
+        // 仅创建者、无最后保存者 → author = 创建者（combine 单侧回归）。
         assert_eq!(entry.author.as_deref(), Some("李四"));
         assert!(body.contains("季度预算分析"));
+    }
+
+    #[test]
+    fn extract_docx_author_includes_last_modified_by() {
+        // BETA-55：docx 的最后保存者（cp:lastModifiedBy）并入 author、可被检索。
+        use zip::write::SimpleFileOptions;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("doc.docx");
+        let f = fs::File::create(&path).unwrap();
+        let mut zw = zip::ZipWriter::new(f);
+        let opts = SimpleFileOptions::default();
+        zw.start_file("word/document.xml", opts).unwrap();
+        zw.write_all(
+            r"<w:document><w:body><w:p><w:r><w:t>会议纪要</w:t></w:r></w:p></w:body></w:document>".as_bytes(),
+        )
+        .unwrap();
+        zw.start_file("docProps/core.xml", opts).unwrap();
+        zw.write_all(
+            r"<cp:coreProperties><dc:creator>张三</dc:creator><cp:lastModifiedBy>燎原</cp:lastModifiedBy></cp:coreProperties>".as_bytes(),
+        )
+        .unwrap();
+        zw.finish().unwrap();
+
+        let ExtractedDoc { entry, .. } = extract_document(&path, 0).unwrap();
+        let author = entry.author.as_deref().expect("应有 author");
+        assert!(author.contains("张三"), "author 应含创建者: {author}");
+        assert!(author.contains("燎原"), "author 应含最后保存者: {author}");
     }
 
     #[test]
