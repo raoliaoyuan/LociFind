@@ -359,6 +359,41 @@ mod tests {
         );
     }
 
+    /// BETA-53 修复守卫：auto-start / start() 经 `persist()` 写入的 token 与 enabled，
+    /// 必须能被 `status()` 从**同一** settings 文件读回——运行态（`status.token`）与持久态
+    /// （磁盘 `settings.mcp_service_token`）不得分叉。
+    #[test]
+    fn status_reads_token_from_same_file_persist_writes() {
+        let dir = std::env::temp_dir().join(format!("locifind-mcpstatus-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let settings_path = dir.join("settings.json");
+        let state = McpServiceState::new(
+            Arc::new(crate::search::embedding_model::EmbeddingModelHandle::new(
+                None,
+                PathBuf::from("/tmp/x"),
+            )),
+            PathBuf::from("/tmp/data"),
+            Some(settings_path.clone()),
+        );
+
+        // 模拟 auto-start / start() 的持久化：置 enabled + token 落盘（与 start 走同一 persist）。
+        let mut settings = AppSettings::default();
+        settings.mcp_service_enabled = true;
+        settings.mcp_service_token = Some("b".repeat(64));
+        state.persist(&settings).unwrap();
+
+        // status() 从 settings_path 读——必须与 persist 写的是同一文件、token 一致。
+        let st = tauri::async_runtime::block_on(state.status());
+        assert!(st.enabled);
+        assert_eq!(st.token.as_deref(), Some("b".repeat(64).as_str()));
+
+        // 分叉守卫：磁盘 settings.mcp_service_token 与运行态 status.token 一致。
+        let on_disk = crate::settings::read_settings_or_default(&Some(settings_path));
+        assert_eq!(on_disk.mcp_service_token, st.token);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// 未运行时 status_locked：running=false、doc_count/semantic 为 None、url 含 8766。
     #[test]
     fn status_locked_when_stopped() {

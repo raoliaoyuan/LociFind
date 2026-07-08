@@ -2,6 +2,33 @@
 
 > STATUS.md 只放摘要；本文件按月留改动概览、验证输出、决策细节。最新在顶部。
 
+## 2026-07-08 — Claude Code (Opus 4.8) — 修复本机 MCP 服务 token 持久化分叉
+
+### 承接
+2026-07-08 排查 Codex 接 LociFind MCP（memory `codex-locifind-mcp-http-wiring` / `mcp-token-ux-dual-settings-bug`）时出现矛盾态：MCP 服务在跑（`/health` 200、旧 token 401 说明持另一 token），但落盘 `%APPDATA%\ai.locifind.desktop\settings.json` 显示 `mcp_service_enabled:false`/`mcp_service_token:null`——运行态与持久态对不上；`%APPDATA%\LociFind\`（index.db/audit.jsonl/log 所在）里无 settings.json。用户手动 reset token 后两份才一致。原假设：`tauri-vs-dirs-data-dir-path-mismatch` 老坑在 token 上复发（双数据目录）。
+
+### 根因定位（推翻双数据目录假设）
+逐链核对当前代码：
+- `mcp_service.rs` 的 `start`/`stop`/`reset_token`/自启全部用 `settings::settings_file_path(&app)`；UI 的 `get_settings`/`update_settings` 用 `get_settings_path(&app)`——**两者都 = `app.path().app_config_dir()/settings.json`**（Windows = `ai.locifind.desktop\settings.json`）。**同一文件，无路径分叉**。`LociFind\` 无 settings.json 属正常（它是服务 `attach_readonly` 的只读 data_dir，非配置目录）。
+- 真根因是**两个写者对同一 settings.json 的覆盖竞争**：
+  1. MCP 开关态/token 由后端**带外**写盘（设计如此，[McpPane.tsx:38](../../apps/desktop/src/components/preferences/McpPane.tsx) 注释「不经 AppSettings 表单」）；
+  2. 偏好表单 `update_settings` 是**全量覆写**——前端 `AppSettings` 快照在弹窗挂载时经 `get_settings` 读一次，`McpPane` 之后改的 token/enabled 从不回灌该快照。用户随后保存任意设置 → 旧快照里的 `mcp_service_token:null`/`enabled:false` 把后端刚写的真 token 冲掉；
+  3. 此时运行中的 axum server 仍持内存里的旧 token（`start()` bind 时注入 `config.access`）→ 磁盘 token 静默失效（401），外部 client 无感退回 grep/直连库。
+- 精确复现观察态：服务在跑并持 token，磁盘却 null/false；reset 重新落盘后两份一致。
+
+### 改动
+- [settings.rs](../../apps/desktop/src-tauri/src/settings.rs)：`update_settings` 拆为 `#[tauri::command]` 薄封装 + 路径化内核 `update_settings_at(&Path, AppSettings)`；写盘前读磁盘现值、经 `merge_backend_managed_mcp_fields` 把 `mcp_service_enabled`/`mcp_service_token` 以磁盘为准合并回来（磁盘成 MCP 两字段唯一信源，表单永不动它们；其余字段仍按前端快照全量写入，语义不变）。+2 测试：`update_settings_preserves_backend_managed_mcp_fields`（前端旧快照带 null/false + 改无关字段 → 落盘后 token/enabled 保留、无关字段正常写）、`update_settings_at_writes_when_no_existing_file`（首存无文件不失败）。测试模块补 `#![allow(clippy::field_reassign_with_default)]`。
+- [mcp_service.rs](../../apps/desktop/src-tauri/src/mcp_service.rs)：+1 测试 `status_reads_token_from_same_file_persist_writes`——模拟自启的 `persist()` 写 token 后，`status().token` 与磁盘 `settings.mcp_service_token` 一致（分叉守卫，task 第 3 点）。
+- doc 注释按 CI pedantic clippy `doc_markdown` 核对：`reset_token`/`McpPane`/`settings.mcp_service_token`/`status.token` 加反引号。
+
+### 为何选后端合并而非「TS interface 加字段 + 表单透传」
+后者依赖前端正确 round-trip（易随 pane 重构再漂），前者是持久化边界处的硬保证——无论前端发什么，两字段都不会被冲掉，与设计「MCP 字段后端带外管理」一致。
+
+### 验证限制
+本机 host `x86_64-pc-windows-msvc` 但 PATH 无 `cl.exe`/MSVC linker/gcc，llama-cpp sys 依赖无法编译 → 桌面 crate 本地跑不了 `cargo test`/`clippy`（与 memory `ci-ubuntu-first-run-lint-gaps` 记的约束一致）。改动均自包含、类型与借用逐行核对；实际编译/测试/clippy 靠 CI（ubuntu）。未 bump 版本，随下个发版携带。
+
+---
+
 ## 2026-07-06（续 3）— Claude Code (Fable 5) — v0.9.16/17 双发版 + 真机反馈二轮修复
 
 ### 承接
