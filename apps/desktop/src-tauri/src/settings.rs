@@ -314,7 +314,7 @@ pub(crate) fn settings_file_path(app: &AppHandle) -> Option<std::path::PathBuf> 
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::unwrap_used, clippy::field_reassign_with_default)]
 
     use super::*;
 
@@ -585,6 +585,58 @@ mod tests {
         assert!(s.semantic_weight.is_none());
     }
 
+    /// BETA-53 修复：设置表单全量覆写不得冲掉后端带外持久化的 MCP token / enabled。
+    /// 复现分叉根因——前端旧快照携 token=null/enabled=false 回写，磁盘现值（后端刚写的
+    /// 真 token + enabled=true）必须保留；其余字段仍按前端快照写入。
+    #[test]
+    fn update_settings_preserves_backend_managed_mcp_fields() {
+        let dir = std::env::temp_dir().join(format!("locifind-mcpmerge-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("settings.json");
+
+        // 磁盘现值：MCP 已由后端带外启用、持有真 token（enabled=true）。
+        let mut on_disk = AppSettings::default();
+        on_disk.mcp_service_enabled = true;
+        on_disk.mcp_service_token = Some("a".repeat(64));
+        write_settings(&f, &on_disk).unwrap();
+
+        // 前端提交的旧快照：MCP 字段是挂载时的陈旧值（null / false），同时改了个无关字段。
+        let mut incoming = AppSettings::default();
+        incoming.mcp_service_enabled = false;
+        incoming.mcp_service_token = None;
+        incoming.enable_tracing = true; // 表单真正想改的字段
+        update_settings_at(&f, incoming).unwrap();
+
+        // 落盘后：MCP 两字段以磁盘现值为准（保留），无关字段按前端写入。
+        let after = read_settings_or_default(&Some(f));
+        assert!(after.mcp_service_enabled, "enabled 不得被表单快照冲成 false");
+        assert_eq!(
+            after.mcp_service_token.as_deref(),
+            Some("a".repeat(64).as_str()),
+            "token 不得被表单快照冲成 null"
+        );
+        assert!(after.enable_tracing, "无关字段应按前端快照正常写入");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 磁盘无 settings.json（首次保存）时，`update_settings_at` 不因缺文件失败，
+    /// 直接按前端快照写入（此时 MCP 字段本就是默认值、无可保留）。
+    #[test]
+    fn update_settings_at_writes_when_no_existing_file() {
+        let dir = std::env::temp_dir().join(format!("locifind-mcpmerge-new-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("settings.json");
+        let mut incoming = AppSettings::default();
+        incoming.enable_tracing = true;
+        update_settings_at(&f, incoming).unwrap();
+        let after = read_settings_or_default(&Some(f));
+        assert!(after.enable_tracing);
+        assert!(!after.mcp_service_enabled);
+        assert!(after.mcp_service_token.is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn read_semantic_weight_reads_or_defaults() {
         assert!(
@@ -836,12 +888,38 @@ pub fn get_extraction_failures() -> Result<Vec<ExtractionFailureJson>, String> {
         .collect())
 }
 
+/// BETA-53 修复：本机 MCP 服务的 `mcp_service_enabled` / `mcp_service_token` 属**后端带外
+/// 持久化**字段——由 `mcp_service.rs`（start / stop / `reset_token` / 自动启动）直接读改写
+/// settings.json，`McpPane` 面板**不经**此设置表单。
+///
+/// 而 `update_settings` 是**全量覆写**：前端 `AppSettings` 快照在弹窗挂载时经 `get_settings`
+/// 一次读入、之后 `McpPane` 改动这两字段不会回灌该快照。用户随后保存任意设置时，旧快照里
+/// 的 token / enabled 会把后端刚写的新值冲掉；此时运行中的 axum server 仍持内存里的旧
+/// token → 磁盘 token 静默失效（401）、外部 client 无感退回 grep。
+///
+/// 解决：以**磁盘现值为准**合并这两字段，让磁盘 settings.json 成为其唯一信源、设置表单
+/// 永远不动它们。其余字段仍按前端快照全量写入（语义不变）。
+fn merge_backend_managed_mcp_fields(incoming: &mut AppSettings, on_disk: &AppSettings) {
+    incoming.mcp_service_enabled = on_disk.mcp_service_enabled;
+    incoming.mcp_service_token = on_disk.mcp_service_token.clone();
+}
+
+/// `update_settings` 的路径化内核（便于单测，不依赖 `AppHandle`）。
+/// 写盘前先读磁盘现值、合并回后端带外管理的 MCP 字段（见 [`merge_backend_managed_mcp_fields`]）。
+fn update_settings_at(path: &std::path::Path, mut settings: AppSettings) -> Result<(), String> {
+    if let Some(on_disk) = fs::read_to_string(path)
+        .ok()
+        .and_then(|c| serde_json::from_str::<AppSettings>(&c).ok())
+    {
+        merge_backend_managed_mcp_fields(&mut settings, &on_disk);
+    }
+    let content = serde_json::to_string_pretty(&settings)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+    fs::write(path, content).map_err(|e| format!("Failed to save settings: {}", e))
+}
+
 #[tauri::command]
 pub fn update_settings(app: AppHandle, settings: AppSettings) -> Result<(), String> {
     let path = get_settings_path(&app)?;
-    let content = serde_json::to_string_pretty(&settings)
-        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
-
-    fs::write(path, content).map_err(|e| format!("Failed to save settings: {}", e))?;
-    Ok(())
+    update_settings_at(&path, settings)
 }
