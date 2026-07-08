@@ -2,7 +2,7 @@
 
 > 目标：验证桌面开关启用后，本机 Claude Code / Codex 能经 MCP 检索并读取桌面已索引的文件。
 > 对应设计：[desktop-local-mcp-service-design.md](./desktop-local-mcp-service-design.md)（S1-S3 code-done）。
-> 离线已验：server lib 93 / desktop 174 / clippy·fmt·tsc+vite 全绿 + `serve_bound` 真 socket 起停集成测试。
+> 离线已验：server lib 93 / desktop 178（v0.9.21 含 reset 轮换 + token 分叉守卫测试）/ clippy·fmt·tsc+vite 全绿 + `serve_bound` 真 socket 起停集成测试。
 > 本 playbook 覆盖离线测不到的部分：GUI 开关流、真实端口绑定、Claude Code 实连 round-trip、语义命中。
 
 数据目录（下称 `<DATA>`）：Windows = `%APPDATA%\LociFind\`（即 `dirs::data_dir()\LociFind`）；
@@ -93,11 +93,27 @@ curl -si -X POST http://127.0.0.1:8766/mcp -H "content-type: application/json" -
 3. 用**旧配置**的 Claude Code 再检索 → 应失败（401 / 连接不可用）。
 4. 复制**新**片段替换 `settings.json` → 重连 → 立即恢复可用（新 token 200，无需先手动开服务）。
 
-**通过判据**：重置后旧 token 立即失效（踢掉旧连接）、新 token 无需手动重启即可重连成功。
+**通过判据**（v0.9.21：reset 运行中自动重启）：重置后**旧 token 立即 401**（踢掉旧连接）、**新 token 立即 200**、开关保持勾选且状态仍「运行中」——无需手动重新启用。
 
 ---
 
-## 5. 审计留痕（可选）
+## 5. 设置保存不冲掉令牌（token 持久化分叉回归，v0.9.21）
+
+验证「在选项里保存别的设置」不会把本机 MCP 服务的令牌 / 开关静默冲掉（v0.9.21 修复的 401 分叉：偏好表单
+全量覆写 `settings.json` 时用旧快照把后端带外写的 token 冲成 null，运行中 server 仍持内存旧 token → 磁盘
+token 静默失效、外部 client 持面板令牌却一直 401）。
+
+1. 服务运行中、Claude Code 能 search；记下 UI 当前 token（前若干位即可）。
+2. 在「选项」里改**任意无关设置**（如「常规」某项、或在「杂项」加/删一个同义词）并**保存**。
+3. 回到「本机 MCP 服务」tab：token 应**不变**、开关仍勾选、状态仍「运行中」。
+4. 用**原配置**的 Claude Code 再 search → 仍成功（**不** 401）。
+5. （可佐证）看 `<DATA>\settings.json`：`mcp_service_token` 与 UI 一致、`mcp_service_enabled=true`，未被覆盖成 `null`/`false`。
+
+**通过判据**：保存无关设置后 token / 开关态不变、外部客户端持续可用（磁盘 settings 与运行态不分叉）。
+
+---
+
+## 6. 审计留痕（可选）
 
 检索若干次后查 `<DATA>\audit.jsonl`——应有 `search` / `read` 动作记录（含时间、query、命中数、读取路径）。
 
@@ -110,8 +126,9 @@ curl -si -X POST http://127.0.0.1:8766/mcp -H "content-type: application/json" -
 | 1 UI 开关与状态（1.1–1.7） | ☐ 通过 / ☐ 失败 | |
 | 2 端口绑定与鉴权 | ☐ 通过 / ☐ 失败 | |
 | 3 Claude Code round-trip | ☐ 通过 / ☐ 失败 | |
-| 4 令牌重置 | ☐ 通过 / ☐ 失败 | |
-| 5 审计留痕（可选） | ☐ 通过 / ☐ N/A | |
+| 4 令牌重置（旧 401 / 新 200 自动重启） | ☐ 通过 / ☐ 失败 | |
+| 5 设置保存不冲掉令牌（v0.9.21） | ☐ 通过 / ☐ 失败 | |
+| 6 审计留痕（可选） | ☐ 通过 / ☐ N/A | |
 
 - 平台 / 版本：
 - 构建路径：A（FTS-only dev）/ B（semantic-recall）
