@@ -160,3 +160,44 @@ desktop 168 全过（全量 365s）· everything 15 · settings 四分支/uninst
 ### 未尽事宜
 - clarify options 方案 A 的 en query 返回中文 options 是既有 i18n 缺口（独立小卡）。
 - 剩 6 partial 的 v0.5 标注锁定项攒批处理（§6.5 豁免额度，累计仍 0 用）。
+
+---
+
+## 2026-07-08 IV — Claude Code (Opus 4.8) — BETA-56 短 CJK 查询（≤2 字）检索兜底
+
+### 起因
+BETA-55 已把 docx「最后保存者」（`docProps/core.xml` `dc:creator`）写进 `DocumentEntry.author`，但真机搜 2 字人名「燎原」仍 0 命中；搜「饶燎原」（3 字）命中同文档。
+
+### 根因
+`documents_fts`/`music_fts` 用 **trigram** tokenizer（BETA-04 起，为支持中文任意子串搜），代价是 **<3 字符查询生不成 3-gram、必然 0 命中**（db.rs 模块注释早已明载）。2 字中文人名（燎原）、常用词（合同/发票/预算）、短编号均受此限；语义臂对内容词有兜底、对人名/编号类无能为力。
+
+### 链路收敛点确认（读码）
+纯短查询两条路径最终都落到 `DocumentIndex::query` 且形态相同（`text=Some("燎原"), fts_match=None`）：
+- **daemon MCP**：`intent_parser::parse("燎原")` → `FileSearch{keywords:["燎原"]}` → `expand_intent_for_daemon` → singleton group「燎原」→ `search_expanded` → `fts_match_from_groups` 的 `is_short_cjk_term` 把 2 字 CJK 词剥空 → `fts=None` → `search_results_inner(base, None)` → `build_doc_query` → `DocumentQuery.text="燎原"`。
+- **desktop**：同经 `LocalIndexBackend`。
+故单一收敛点 = `DocumentIndex::query`（`MusicIndex::query` 对称），改此一处两路径皆受益。
+
+### 修法（方案 1：短查询 metadata LIKE 兜底）
+- 新增共享判据 `db::short_metadata_like_terms(text)`：whitespace 切分后，仅当**全部**词满足「<3 字符且纯 alphanumeric/CJK」时返回这些词（`char::is_alphanumeric` 对 CJK 表意字 Unicode `Lo` 亦 true，故「燎原」/「AI」命中；含符号/空白病态输入如 `a" OR b` 不命中、保 `fts_sanitize` 路径零回归）。长短混合 / 含 ≥3 字长词 / 空 → 返回空 vec（不兜底、交 FTS）。
+- `DocumentIndex::query`：`q.fts_match.is_none()` 时取短词；非空则 `use_like`，SQL 三分支（FTS+snippet / LIKE / structured-only）。LIKE 子句 = 每词 `(d.title LIKE :lkN OR d.author LIKE :lkN OR d.file_name LIKE :lkN)` 组间 AND，与既有 `filters`（author/doc_type/doc_types）复合，`ORDER BY modified_time DESC`。短词全 alnum/CJK、不含 `%`/`_` 元字符，故 `%词%` 直接拼、无需 ESCAPE。**不扫 body**（正文全表 LIKE 慢且噪声高）。
+- `MusicIndex::query`：对称加 `use_like` 分支，LIKE 列为 artist/title/album/file_name。
+- 绑定：`:match` 仅 `with_snippet=!use_like && match_expr.is_some()` 时绑，`:lkN` 仅 `use_like` 时绑（避免 rusqlite「未用命名参数」报错）。
+
+### 测试
+- indexer 186（+4）：`short_cjk_query_hits_author_via_like_fallback`（author 命中 + 无 snippet）/ `short_query_like_fallback_matches_title_and_file_name`（title/file_name 命中 + body 不扫）/ `short_query_like_fallback_respects_doc_type_filter`（LIKE×doc_types 复合）/ `short_cjk_query_hits_music_metadata_via_like_fallback`。
+- local-index 27（+1）：`search_expanded_short_cjk_query_hits_via_like_fallback`——走生产 `search_results_expanded`，证明「词组剥空 → 回退 base keyword → LIKE 兜底」全链路 + ≥3 字正文词 FTS 主路径未动。
+- server 93 零回归；touched crate `clippy -D warnings`/fmt 净；`cargo build -p locifindd`（worktree）净。
+
+### 真机 MCP 验证（HTTP，无需 llama）
+- `--model-path` 传 `.tmp/enterprise-smoke/dummy.gguf` → 无 llama feature 的 stub embedder `embed()` 返 Err → `semantic_ready=false` → daemon 退化 FTS-only（LIKE 兜底在 FTS 臂、与语义无关）。
+- 手工 docx（Python zipfile）：`docProps/core.xml` `dc:creator=燎原 饶`、`word/document.xml` 正文「合同纠纷违约金」、文件名 `案卷2024.docx`——**燎原只在 author**。
+- `locifindd --root corpus --token <32hex> --data-dir data --model-path dummy.gguf --bind 127.0.0.1:8790`；`/health` 200、`document_added=1`。
+- MCP `tools/call search`（Python urllib 走 UTF-8，避 Git Bash `-d` 中文 body 乱码；响应 SSE `data:` 帧）：「燎原」0→**命中 `案卷2024.docx`**、「违约金」正文 FTS 仍命中、「饶燎原」（author 非连续）0、「张三」0。
+
+### 备注（trap）
+- clap flag 是 `--model-path`（kebab），非 `--model_path`（首次误传 daemon 直接退出）。
+- Git Bash `curl -d` 传中文 JSON body → 服务端 serde「invalid unicode code point」；改 Python urllib UTF-8 编码 body。
+- 本机（Roger）msvc 工具链可正常 build/link/test/clippy/跑 locifindd。
+
+### 未尽事宜
+- 正文内容词的 2 字查询（body-only）仍不由 LIKE 兜底（只扫 metadata）——语义臂兜底；如需可后续评估 option 2（author 等短元数据 exact 路径）或 body LIKE 的性能护栏。

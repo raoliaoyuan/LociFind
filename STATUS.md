@@ -8,13 +8,13 @@
 
 - **阶段**：B（Beta）进行中（最新发版 **v0.9.20**——含 BETA-53 本机 MCP 服务，待 CI 出包 + 用户 Windows 真机测）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**BETA-54 数字/编号检索 gap 修复 done（2026-07-08 代码层）**——排查 Codex 接本机 MCP 时真机复现「`search 150138` 0 命中但 `准考证` 命中同文档」：根因 intent-parser `extract_en_residual_keywords` 把纯数字 token 一律当噪声剥（电话/案号/身份证号连带遭殃），修 = `is_incidental_number`（<6 位才剥、≥6 位保留为字面 keyword）；desktop UI 与 MCP daemon 共用 `parse` 一改两受益。242 单测全绿 + 重编 locifindd 真机 MCP 实搜验证（`150138`/`440307`→命中、`2024` 仍 0）。**生效待桌面 app 出新版**（现跑 8766 仍旧码）。顺带修好 Codex↔MCP 接线（Codex 用 TOML `[mcp_servers]` 不吃 Claude JSON、`codex mcp add --url`+token 走环境变量）+ 派后台会话修两 token bug（`task_7260d343`/`task_06f499be`）。上一里程碑 **BETA-53 本机 MCP 服务 done**（v0.9.20）。
+- **当前 task**：**BETA-56 短 CJK 查询（≤2 字）检索兜底 done（2026-07-08）**——BETA-55 把最后保存者写进 `author` 后，真机搜 2 字人名「燎原」仍 0 命中（`documents_fts`/`music_fts` trigram tokenizer，<3 字符生不成 3-gram 必 0；2 字人名/常用词/短编号同受限）。修 = `DocumentIndex::query`/`MusicIndex::query` **短查询 metadata LIKE 兜底**：无 `fts_match` 且 query 全词 <3 字纯 alnum/CJK → `LIKE '%词%'` 匹配 metadata 列（doc: title/author/file_name；music: 加 artist/album；**不扫 body**），长短混合仍走 FTS。desktop 搜索与 daemon MCP 共用 `LocalIndexBackend`——纯短查询在 `fts_match_from_groups` 被剥空 → 回退 base keyword → `query` 兜底，一改两受益。indexer +4 / local-index +1 端到端全绿 + clippy `-D warnings`/fmt 净；**真机 MCP 实锤**：新建 FTS-only daemon 挂 `dc:creator=燎原 饶`（正文/文件名均不含）语料，HTTP MCP 搜「燎原」0→命中 `案卷2024.docx`、「违约金」FTS 仍命中、「张三」0。上一里程碑 **BETA-54 数字/编号检索 gap done**（代码层，生效待桌面 app 出新版）。
 - **下一步 top-3**：① **设计伙伴/首个真实部署主动获取**（护城河 P0，ROADMAP §5；BETA-40 真实内网证据/BETA-44 语料扩充均以此为前提）；② **macOS 真机整体待跑**（出场线 Class A 唯一剩项；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；③ BETA-53 可选复核：真 Claude Code 进程连 `~/.claude/settings.json` 走一遍（[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（音乐全盘发现语义 2026-07-06 方案 A〔按 roots 过滤〕拍板并落地）。
 
 ## 当前 Task
 
-**2026-07-08（最新）**：**BETA-54 数字/编号检索 gap 修复 done（代码层）**（详见同名会话日志）。用户观察「Codex 感觉绕过 MCP 直连索引库」→ 排查发现 Codex 从没真正连上 MCP（贴的 Claude 风格 `mcpServers` JSON 没进 Codex 的 TOML 配置），「绕行」实为无工具时的自救。修好接线（`codex mcp add locifind-local --url http://127.0.0.1:8766/mcp --bearer-token-env-var LOCIFIND_MCP_TOKEN`，端到端验证 `仙本那`=3 + audit 留痕）后，真机复现出真正的检索层 bug：`search 150138`/`440307` 0 命中但 `准考证` 命中同文档。**根因**：`packages/intent-parser/src/parsers/file_search.rs` `extract_en_residual_keywords` 的 `is_signal` 判据把 `tok.chars().all(is_ascii_digit)` 一律剥（年份/尺寸/日号本意剥，电话/案号/身份证号连带遭殃）→ keywords 空 → FTS 臂无检索词（底层 trigram 本可子串命中数字）。**修法**：新增 `is_incidental_number`（纯数字且 <`IDENTIFIER_DIGIT_MIN=6` 位才剥、≥6 位保留为字面 keyword）替换该判据；desktop 搜索 UI 与 MCP daemon 共用 `intent_parser::parse` 一改两受益。**验证**：intent-parser 242 单测全绿（新增 4：阈值 / 长号码保留 / 短数字仍剥守 date-size 零回归 / parse 端到端）；重编 `locifindd`〔build-locifindd-llama.bat〕挂含号码语料到 `:8788`，经 HTTP MCP 实搜 `150138`/`440307`/`15013866763`/`440307201312314812`→0 变命中、`2024` 仍 0、`仙本那` 对照命中。**生效条件**：桌面 app 需出带本改动新版本（现跑 8766 desktop MCP 仍旧码）。附带发现两 MCP token bug（面板只弹一次+「重置令牌」按钮缺失 / 双 settings 路径分叉）已派后台会话 `task_7260d343`·`task_06f499be`。
+**2026-07-08（最新）**：**BETA-56 短 CJK 查询（≤2 字）检索兜底 done**（详见同名会话日志）。承接 BETA-55（最后保存者进 `author`）真机暴露：搜 2 字人名「燎原」0 命中——`documents_fts`/`music_fts` 用 trigram tokenizer（为支持中文任意子串），代价是 <3 字符查询生不成 3-gram、必然 0 命中（db.rs 注释已明载）；2 字人名 / 常用词（合同/发票/预算）/ 短编号同受限，语义臂对内容词有兜底、对人名/编号类无能为力。**修法**（方案 1 短查询 LIKE 兜底）：`DocumentIndex::query`/`MusicIndex::query` 新增分支——无 `fts_match` 且 query 经 whitespace 切分后 **全部** 词 <3 字符且纯 alnum/CJK 时，改走 `LIKE '%词%'` 子串匹配 metadata 列（doc: title/author/file_name；music: 加 artist/album；**不扫 body**——正文全表 LIKE 慢且噪声高、内容词由语义臂兜底），长短混合查询保持 FTS。共享判据 `db::short_metadata_like_terms`（`char::is_alphanumeric` 对 CJK 表意字亦 true；含符号病态输入如 `a" OR b` 不触发、保 `fts_sanitize` 零回归）。desktop 搜索与 daemon MCP 共用 `LocalIndexBackend`——纯短查询在 `fts_match_from_groups` 被剥空 → fts=None → 回退 base keyword → `query` 兜底，**一处修两路径皆受益**。**验证**：indexer +4（doc author/title/file_name 命中 + body 不扫 + doc_type 过滤 + music 元数据）/ local-index +1 端到端（走 `search_expanded` 生产路径）全绿，全 crate clippy `-D warnings`/fmt 净；**真机 MCP 达成**：新建 daemon FTS-only（`--model-path` 传 dummy.gguf → stub embedder → FTS-only）挂含 `dc:creator=燎原 饶`（正文/文件名均不含该串）的手工 docx 语料，HTTP MCP 搜「燎原」0→命中 `案卷2024.docx`、「违约金」正文 FTS 仍命中、「饶燎原」（author 非连续）/「张三」0。
 
 ## 下一步
 
@@ -39,6 +39,12 @@
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
 
+### 2026-07-08 — Claude Code (Opus 4.8) — BETA-56 短 CJK 查询（≤2 字）检索兜底
+
+**承接**：BETA-55 把 docx 最后保存者写进 `author` 后，真机搜 2 字人名「燎原」仍 0 命中。诊断：`documents_fts`/`music_fts` 用 **trigram** tokenizer，<3 字符生不成 3-gram 必 0（db.rs 注释已明载）；2 字人名/常用词/短编号同受限。链路确认——纯短查询在 daemon `search_expanded` 里被 `fts_match_from_groups` 剥空 → fts=None → 回退 base keyword → `DocumentQuery.text`，**单一收敛点 = `DocumentIndex::query`**（desktop 与 MCP 两路径皆经此）。
+**修法**（方案 1）：`DocumentIndex::query`/`MusicIndex::query` 加短查询 metadata LIKE 兜底——无 `fts_match` 且 query 全词 <3 字纯 alnum/CJK → `LIKE '%词%'` 匹配 metadata 列（doc: title/author/file_name；music: 加 artist/album；不扫 body），长短混合仍走 FTS。共享判据抽 `db::short_metadata_like_terms`（`char::is_alphanumeric` 覆盖 CJK；含符号病态输入不触发保零回归）。
+**结果**：indexer 186（+4）/ local-index 27（+1 端到端）/ server 93 全绿；touched crate clippy `-D warnings`/fmt 净；locifindd 从 worktree 编译净。**真机 MCP 达成**：dummy.gguf → stub embedder → FTS-only daemon 挂手工 docx（`dc:creator=燎原 饶`、正文/文件名不含该串），HTTP MCP 搜「燎原」0→命中、「违约金」FTS 仍命中、「饶燎原」/「张三」0。ROADMAP 登 BETA-56（done）。**详录**：[session-details-2026-07.md](docs/session-logs/session-details-2026-07.md)。
+
 ### 2026-07-08 — Claude Code (Opus 4.8) — BETA-54 数字/编号检索 gap 修复 + Codex↔MCP 接线
 
 **承接**：用户带 Codex 截图问「Codex 感觉绕过 MCP 直连索引库、是不是有问题」。诊断链：① 读 `search.rs`/`doc_db.rs` 纠正自己的 tokenizer 误判（FTS 是 **trigram**、数字本可子串命中）；② 查 `~/.codex/config.toml` + 全局状态实锤——**Codex 从没真正连上 MCP**（用户贴的 Claude 风格 `mcpServers` JSON 没进 Codex 的 TOML，只有 `node_repl` 一个 server），「绕行」= 无工具时自救。
@@ -54,12 +60,4 @@
 **结果**：server lib 93 pass（+2）/ desktop 174 pass（+3）/ clippy `-D warnings`〔server·desktop·daemon〕/ fmt / tsc+vite 全绿；三方许可补 `getrandom`；设计文档 + ROADMAP BETA-53 标 code-done。
 **真机验证达成（同会话续跑）**：功能 §2/§3/§4（harness + 对实跑 app curl）+ computer-use 驱动 dev app GUI 全流程 + 语义路径 B（`semantic-recall` 构建 harness：`semantic=true` + 中文 query 命中英文文档跨语言召回）三维均通过 → BETA-53 转 done；仅余可选「真 Claude Code 进程实连」（协议已 curl 验过）。
 **发版**：bump **v0.9.20**（tauri.conf.json + Cargo.toml + Cargo.lock；含 BETA-53 本机 MCP 服务），推 `v0.9.20` tag 触发 release-windows.yml；Release changelog 补 MCP 服务用法 + 模型放置指引，待用户 Windows 真机测。
-
-### 2026-07-07 IV — Claude Code (Opus 4.8) — daemon 正斜杠 root bug 修复 + 桌面本机 MCP 服务设计 & S1
-
-**承接**：用户问「能否工具菜单开关 BETA-43」→ 澄清诉求实为「让 Claude Code 经 MCP 检索本机文件」= **BETA-32 个人变体（非 BETA-43）**。本机跑通独立 daemon 验证（FTS-only、search 内容命中准考证），走通中发现 `read_document` round-trip bug → 用户「先查 bug 再实现 A」。
-**关键决策**：桌面「本机 MCP 服务」走**内嵌**（非起子进程）——复用桌面已加载检索栈、**只读挂载**桌面 index.db（零重索引、语义白送）；端口 **8766**、只绑 `127.0.0.1` + token。
-**产出**：① daemon bug 修复（正斜杠 root → `documents.path` 混合分隔符 → `\\?\` canonicalize 路径 lookup 落空，修 = root 入口 `normalize_root` 归一 + 单测；正斜杠 root 实测 round-trip OK，commit 9b55a1c）；② [设计提案](docs/reviews/desktop-local-mcp-service-design.md)（3 阶段 S1-S3）；③ **S1 done**：`ServerCtx::attach_readonly`（开现有 db 不跑首索引、复用传入 embedder + 单测）。
-**结果**：locifind-server 91 pass / clippy `-D warnings` / fmt 净；BETA-53 登 ROADMAP。
-**未尽事宜**：S2（Tauri 起停命令 + 设置持久化）/ S3（React UI）下轮。
 

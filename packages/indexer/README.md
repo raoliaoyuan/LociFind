@@ -89,6 +89,11 @@ artist/title/album 文本（音乐 metadata 量级可忽略）。
   （BETA-11B）范畴。**BETA-42**：查询侧多词组合走 AND 拼接时，<3 字纯 CJK 词项会被上层
   （`locifind-local-index-backend` 的 `fts_match_from_groups`）从 AND 条件里剔除，避免其
   结构性不可匹配拖垮整个组合查询——但该短词本身仍不参与匹配约束，此 known limitation 未变。
+  **BETA-56（短查询 metadata LIKE 兜底）**：`DocumentIndex::query`/`MusicIndex::query` 对
+  「无 `fts_match` 且 query 全词 <3 字符纯 alnum/CJK」的纯短查询改走 `LIKE '%词%'` 匹配
+  **metadata 列**（documents: title/author/file_name；music: artist/title/album/file_name；
+  **不扫 body**），让 2 字人名（「燎原」）/ 常用词 / 短编号命中元数据；判据 `db::short_metadata_like_terms`。
+  长短混合查询仍走 FTS（正文内容仍受 <3 字限制，由语义臂兜底）。
 - **`bundled` 编译需 C 编译器**：rusqlite `bundled` 从源码编译 SQLite，需 macOS clang /
   Windows MSVC（项目已因 llama.cpp 具备该前置，无新增系统依赖）。首次编译较慢。
 - **单线程顺序索引**：未做并发；音乐库通常千级文件量级，足够。并发优化按需。

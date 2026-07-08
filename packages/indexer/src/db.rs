@@ -7,11 +7,15 @@
 //!
 //! tokenizer 用 **`trigram`**（非 `unicode61`）：`unicode61` 把连续 CJK 当单个 token，
 //! 子串/前缀搜不到中文片段（BETA-04 暴露）；`trigram` 支持任意 **≥3 字符**子串匹配
-//! （CJK + 英文，默认大小写不敏感）。代价：<3 字符查询无法命中（trigram 固有限制）。
+//! （CJK + 英文，默认大小写不敏感）。代价：<3 字符查询无法命中（trigram 固有限制）——
+//! BETA-56 为此补 **短查询 metadata LIKE 兜底**（见 [`short_metadata_like_terms`]）：纯 <3
+//! 字符查询改走 LIKE 子串匹配 metadata 列（music: artist/title/album/file_name；
+//! documents: title/author/file_name），让 2 字人名/常用词也能命中元数据（正文不扫）。
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rusqlite::types::ToSql;
 use rusqlite::{named_params, params, Connection, OptionalExtension};
 
 use crate::model::{MusicEntry, MusicQuery};
@@ -301,7 +305,47 @@ impl MusicIndex {
             .fts_match
             .clone()
             .or_else(|| q.text.as_deref().map(fts_sanitize));
-        let rows = if let Some(sanitized) = match_expr {
+
+        // BETA-56 短查询 metadata LIKE 兜底（与 `documents_fts` 同理：`music_fts` 也是 trigram，
+        // <3 字符查询 0 命中）。无 fts_match 且 text 全为 <3 字符纯 alnum/CJK → LIKE 子串匹配
+        // artist/title/album/file_name（判据见 [`short_metadata_like_terms`]）。
+        let like_terms = if q.fts_match.is_none() {
+            short_metadata_like_terms(q.text.as_deref())
+        } else {
+            Vec::new()
+        };
+
+        let rows = if !like_terms.is_empty() {
+            // 短词全为 alnum/CJK、不含 LIKE 元字符，直接两端加 `%` 作子串模式。
+            let like_patterns: Vec<String> = like_terms.iter().map(|t| format!("%{t}%")).collect();
+            let like_keys: Vec<String> = (0..like_terms.len()).map(|i| format!(":lk{i}")).collect();
+            let like_clause = like_keys
+                .iter()
+                .map(|k| {
+                    format!(
+                        "(m.artist LIKE {k} OR m.title LIKE {k} OR m.album LIKE {k} OR m.file_name LIKE {k})"
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            let sql = format!(
+                "{select} WHERE {like_clause} AND {filters} ORDER BY m.artist, m.title LIMIT :limit"
+            );
+            let mut stmt = self.conn.prepare(&sql)?;
+            let mut bound: Vec<(&str, &dyn ToSql)> = vec![
+                (":artist", &q.artist),
+                (":album", &q.album),
+                (":format", &q.format),
+                (":limit", &limit),
+            ];
+            for (k, v) in like_keys.iter().zip(&like_patterns) {
+                bound.push((k.as_str(), v));
+            }
+            let rows = stmt
+                .query_map(&bound[..], row_to_entry)?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        } else if let Some(sanitized) = match_expr {
             let sql = format!(
                 "{select} JOIN music_fts f ON f.rowid = m.id
                  WHERE music_fts MATCH :match AND {filters}
@@ -403,6 +447,31 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<MusicEntry> {
 pub(crate) fn fts_sanitize(text: &str) -> String {
     let escaped = text.replace('"', "\"\"");
     format!("\"{escaped}\"")
+}
+
+/// BETA-56：抽取「trigram 无法命中」的短查询词，供 `music_fts` / `documents_fts` 两侧
+/// 的 metadata LIKE 兜底共用（trigram tokenizer 下 <3 字符查询生不成 3-gram、必然 0 命中）。
+///
+/// whitespace 切分后，仅当 **全部** 词都满足「<3 字符且纯 alphanumeric/CJK」时返回这些词
+/// （纯短查询，FTS 结构性 0 命中）——`char::is_alphanumeric` 对 CJK 表意字（Unicode `Lo`）
+/// 亦为 true，故「燎原」/「AI」命中；含符号/空白的病态输入（如 `a" OR b`）不命中、
+/// 保持原 `fts_sanitize` 路径零回归。长短混合、含 ≥3 字长词、`text` 为空 → 返回空 vec（不兜底，
+/// 交 FTS：长词可命中，短词为已知限制、语义臂兜底）。
+pub(crate) fn short_metadata_like_terms(text: Option<&str>) -> Vec<String> {
+    let Some(t) = text else {
+        return Vec::new();
+    };
+    let terms: Vec<String> = t.split_whitespace().map(str::to_owned).collect();
+    let all_short_wordlike = !terms.is_empty()
+        && terms.iter().all(|w| {
+            let n = w.chars().count();
+            n < 3 && w.chars().all(char::is_alphanumeric)
+        });
+    if all_short_wordlike {
+        terms
+    } else {
+        Vec::new()
+    }
 }
 
 /// `path` 是否在 `root` 子树下（前缀 + 分隔符边界，大小写敏感按 OS 原生）。
@@ -508,6 +577,46 @@ mod tests {
             .unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].artist.as_deref(), Some("周华健"));
+    }
+
+    /// BETA-56：2 字中文查询经 trigram `music_fts` 必 0 命中，短查询 LIKE 兜底应命中
+    /// artist / title / file_name；三列都无 → 0。
+    #[test]
+    fn short_cjk_query_hits_music_metadata_via_like_fallback() {
+        let idx = MusicIndex::open_in_memory().unwrap();
+        idx.upsert_entry(&entry("/m/a.mp3", "燎原", "夜曲", "MP3"))
+            .unwrap();
+        idx.upsert_entry(&entry("/m/b.flac", "Eason", "浮夸", "FLAC"))
+            .unwrap();
+
+        // 2 字 artist 经 LIKE 兜底命中。
+        let by_artist = idx
+            .query(&MusicQuery {
+                text: Some("燎原".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(by_artist.len(), 1, "2 字 artist 应经 LIKE 兜底命中");
+        assert_eq!(by_artist[0].artist.as_deref(), Some("燎原"));
+
+        // 2 字 title 命中。
+        let by_title = idx
+            .query(&MusicQuery {
+                text: Some("浮夸".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(by_title.len(), 1);
+        assert_eq!(by_title[0].title.as_deref(), Some("浮夸"));
+
+        // 三列均无 → 0。
+        let none = idx
+            .query(&MusicQuery {
+                text: Some("张三".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(none.is_empty());
     }
 
     #[test]

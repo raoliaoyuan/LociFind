@@ -5,6 +5,14 @@
 > 后续会话的详录写入 session-details-YYYY-MM.md、溢出摘要滚动追加到本文件。
 
 ---
+### 2026-07-07 IV — Claude Code (Opus 4.8) — daemon 正斜杠 root bug 修复 + 桌面本机 MCP 服务设计 & S1
+
+**承接**：用户问「能否工具菜单开关 BETA-43」→ 澄清诉求实为「让 Claude Code 经 MCP 检索本机文件」= **BETA-32 个人变体（非 BETA-43）**。本机跑通独立 daemon 验证（FTS-only、search 内容命中准考证），走通中发现 `read_document` round-trip bug → 用户「先查 bug 再实现 A」。
+**关键决策**：桌面「本机 MCP 服务」走**内嵌**（非起子进程）——复用桌面已加载检索栈、**只读挂载**桌面 index.db（零重索引、语义白送）；端口 **8766**、只绑 `127.0.0.1` + token。
+**产出**：① daemon bug 修复（正斜杠 root → `documents.path` 混合分隔符 → `\\?\` canonicalize 路径 lookup 落空，修 = root 入口 `normalize_root` 归一 + 单测；正斜杠 root 实测 round-trip OK，commit 9b55a1c）；② [设计提案](../reviews/desktop-local-mcp-service-design.md)（3 阶段 S1-S3）；③ **S1 done**：`ServerCtx::attach_readonly`（开现有 db 不跑首索引、复用传入 embedder + 单测）。
+**结果**：locifind-server 91 pass / clippy `-D warnings` / fmt 净；BETA-53 登 ROADMAP。
+**未尽事宜**：S2（Tauri 起停命令 + 设置持久化）/ S3（React UI）下轮。
+
 ### 2026-07-07 III — Claude Code (Opus 4.8) — v0.9.18/19 Windows 真机验证（computer-use 驱动）
 
 **承接**：用户「我已装好，帮忙测试」→ computer-use 驱动装机版桌面 App 做非破坏性功能验证 + 用户手验卸载/升级。

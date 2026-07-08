@@ -1114,6 +1114,51 @@ mod tests {
         assert!(hits[0].path.ends_with("note.txt"));
     }
 
+    /// BETA-56（2026-07-08 真机沉淀）：2 字中文查询（人名/常用词）经生产 `search_expanded`
+    /// 全链路——`fts_match_from_groups` 把 <3 字 CJK 词组剥空（trigram 无法命中）→ fts=None
+    /// → 回退 base keyword → `DocumentIndex::query` 短查询 LIKE 兜底命中 file_name/title。
+    /// 复现真机 bug：搜「燎原」此前 0 命中，兜底后命中 metadata 含它的文档。
+    #[test]
+    fn search_expanded_short_cjk_query_hits_via_like_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        // file_name 含 2 字人名「燎原」；正文不含，确保命中来自 metadata LIKE 而非 FTS 正文。
+        std::fs::write(docs.join("燎原-季度总结.txt"), "本季度营收与成本分析").unwrap();
+        std::fs::write(docs.join("其他.txt"), "无关内容").unwrap();
+        let db = dir.path().join("index.db");
+        let backend = LocalIndexBackend::new(&db);
+        backend
+            .reindex_with(
+                None,
+                None,
+                &[],
+                std::slice::from_ref(&docs),
+                &[],
+                &locifind_indexer::GlobSet::empty(),
+            )
+            .expect("reindex");
+
+        // base.keywords=["燎原"] + 词组 singleton("燎原")：词组被 fts_match_from_groups 剥空，
+        // 回退 base keyword 走短查询 LIKE 兜底。
+        let exp = expanded(
+            file_search(Some(vec!["燎原"])),
+            vec![KeywordGroup::singleton("燎原")],
+        );
+        let hits = backend.search_results_expanded(&exp).unwrap();
+        assert_eq!(hits.len(), 1, "2 字人名应经短查询 LIKE 兜底命中 file_name");
+        assert!(hits[0].path.ends_with("燎原-季度总结.txt"));
+
+        // 对照：≥3 字正文词（「营收」在 body）此前即经 FTS trigram 正常命中（documents_fts
+        // 只索引 title/author/body，file_name 由本次 LIKE 兜底补齐）——证明未动 FTS 主路径。
+        let exp3 = expanded(
+            file_search(Some(vec!["营收与成本"])),
+            vec![KeywordGroup::singleton("营收与成本")],
+        );
+        let hits3 = backend.search_results_expanded(&exp3).unwrap();
+        assert_eq!(hits3.len(), 1, "≥3 字正文词走 FTS 仍命中");
+    }
+
     // ===== BETA-20：结果预览面板数据源 =====
 
     // 注：音乐预览的 `entry_for_path` 取数已在 indexer `db.rs` 单测覆盖

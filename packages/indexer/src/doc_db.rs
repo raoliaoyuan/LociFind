@@ -8,7 +8,10 @@ use std::path::Path;
 use rusqlite::types::ToSql;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::db::{fts_sanitize, path_is_under, root_glob_params, root_glob_predicate, unix_now};
+use crate::db::{
+    fts_sanitize, path_is_under, root_glob_params, root_glob_predicate, short_metadata_like_terms,
+    unix_now,
+};
 use crate::model::{
     DocumentEntry, DocumentHit, DocumentPreview, DocumentQuery, ExtractedDoc, ExtractionFailure,
     PageFailure, PagePassage,
@@ -475,12 +478,41 @@ impl DocumentIndex {
             .fts_match
             .clone()
             .or_else(|| q.text.as_deref().map(fts_sanitize));
-        let with_snippet = match_expr.is_some();
+
+        // BETA-56 短查询 metadata LIKE 兜底：`documents_fts` 是 trigram tokenizer，
+        // <3 字符查询生不成 3-gram、必然 0 命中（2 字中文人名「燎原」/ 常用词受此限）。
+        // 当查询由 text 派生（无原始 `fts_match`——有则说明存在可命中的长词/词组）且
+        // **全部** whitespace 切分词都是 <3 字符纯 alnum/CJK 时，改用 LIKE 子串匹配
+        // title/author/file_name（**不扫 body**：正文全表 LIKE 慢且噪声高，内容词由语义臂兜底）。
+        // 长短混合查询（如「市场调研 饶」）保持 FTS（长词可命中，短词为已知限制）。
+        let like_terms: Vec<String> = if q.fts_match.is_none() {
+            short_metadata_like_terms(q.text.as_deref())
+        } else {
+            Vec::new()
+        };
+        let use_like = !like_terms.is_empty();
+        // 短词全为 alnum/CJK（见 short_metadata_like_terms 守卫），不含 LIKE 元字符 `%`/`_`，
+        // 故直接两端加 `%` 作子串模式、无需 ESCAPE 转义。
+        let like_patterns: Vec<String> = like_terms.iter().map(|t| format!("%{t}%")).collect();
+        let like_keys: Vec<String> = (0..like_terms.len()).map(|i| format!(":lk{i}")).collect();
+        let like_clause = like_keys
+            .iter()
+            .map(|k| format!("(d.title LIKE {k} OR d.author LIKE {k} OR d.file_name LIKE {k})"))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+
+        let with_snippet = !use_like && match_expr.is_some();
         let sql = if with_snippet {
             format!(
                 "SELECT {cols}, snippet(documents_fts, 2, '[', ']', '…', 10) AS snip
                  FROM documents d JOIN documents_fts f ON f.rowid = d.id
                  WHERE documents_fts MATCH :match AND {filters}
+                 ORDER BY d.modified_time DESC LIMIT :limit"
+            )
+        } else if use_like {
+            format!(
+                "SELECT {cols}, NULL AS snip FROM documents d
+                 WHERE {like_clause} AND {filters}
                  ORDER BY d.modified_time DESC LIMIT :limit"
             )
         } else {
@@ -498,8 +530,15 @@ impl DocumentIndex {
             (":doc_type", &q.doc_type),
             (":limit", &limit),
         ];
-        if let Some(s) = &sanitized {
-            bound.push((":match", s));
+        if with_snippet {
+            if let Some(s) = &sanitized {
+                bound.push((":match", s));
+            }
+        }
+        if use_like {
+            for (k, v) in like_keys.iter().zip(&like_patterns) {
+                bound.push((k.as_str(), v));
+            }
         }
         for (k, v) in dt_keys.iter().zip(&dt_list) {
             bound.push((k.as_str(), *v));
@@ -1129,6 +1168,95 @@ mod tests {
             })
             .unwrap();
         assert_eq!(by_author.len(), 1, "应经 author 列 FTS 命中");
+    }
+
+    /// BETA-56（2026-07-08 真机沉淀）：2 字中文查询（人名「燎原」）经 trigram FTS 必 0 命中，
+    /// 短查询 metadata LIKE 兜底应命中 author 含它的文档；≥3 字（「饶燎原」）仍走 FTS。
+    #[test]
+    fn short_cjk_query_hits_author_via_like_fallback() {
+        let idx = DocumentIndex::open_in_memory().unwrap();
+        idx.upsert_document(&doc("/d/合同.docx", "docx", "燎原 饶"), "正文与人名无关")
+            .unwrap();
+        idx.upsert_document(&doc("/d/other.docx", "docx", "张三"), "无关内容")
+            .unwrap();
+
+        // 2 字查询走 LIKE 兜底命中 author。
+        let by_short = idx
+            .query(&DocumentQuery {
+                text: Some("燎原".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(by_short.len(), 1, "2 字人名应经 LIKE 兜底命中 author");
+        assert!(by_short[0].entry.path.ends_with("合同.docx"));
+        // 兜底路径不产 FTS 片段。
+        assert!(by_short[0].snippet.is_none());
+
+        // 多段全短词（「燎原」+「饶」）→ 组间 AND，两子串都需在同一文档 metadata 出现。
+        let by_two = idx
+            .query(&DocumentQuery {
+                text: Some("燎原 饶".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(by_two.len(), 1, "全短词多段经 LIKE 兜底 AND 命中 author");
+    }
+
+    /// BETA-56：短查询 LIKE 兜底覆盖 title / file_name；未命中任一 metadata 列 → 0。
+    #[test]
+    fn short_query_like_fallback_matches_title_and_file_name() {
+        let idx = DocumentIndex::open_in_memory().unwrap();
+        // doc() 的 title="季度报告"；file_name 取路径末段。
+        idx.upsert_document(&doc("/d/发票2024.pdf", "pdf", "无关"), "正文")
+            .unwrap();
+
+        // 命中 file_name「发票2024.pdf」中的「发票」。
+        let by_fn = idx
+            .query(&DocumentQuery {
+                text: Some("发票".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(by_fn.len(), 1, "2 字应命中 file_name 子串");
+
+        // 命中 title「季度报告」中的「季度」。
+        let by_title = idx
+            .query(&DocumentQuery {
+                text: Some("季度".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(by_title.len(), 1, "2 字应命中 title 子串");
+
+        // 三列都无「预算」→ 0（正文含「预算」也不兜底，body 不参与 LIKE）。
+        idx.upsert_document(&doc("/d/x.pdf", "pdf", "无关"), "本季度预算说明")
+            .unwrap();
+        let none = idx
+            .query(&DocumentQuery {
+                text: Some("预算".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(none.is_empty(), "短查询兜底只扫 metadata、不扫 body");
+    }
+
+    /// BETA-56：短查询兜底仍尊重 doc_types 结构化过滤（LIKE 与 filters 复合）。
+    #[test]
+    fn short_query_like_fallback_respects_doc_type_filter() {
+        let idx = DocumentIndex::open_in_memory().unwrap();
+        idx.upsert_document(&doc("/d/合同.png", "png", "燎原"), "x")
+            .unwrap();
+        idx.upsert_document(&doc("/d/合同.docx", "docx", "燎原"), "y")
+            .unwrap();
+        let only_img = idx
+            .query(&DocumentQuery {
+                text: Some("燎原".to_string()),
+                doc_types: Some(vec!["png".to_string()]),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(only_img.len(), 1, "doc_types 应框定兜底结果");
+        assert_eq!(only_img[0].entry.doc_type, "png");
     }
 
     #[test]
