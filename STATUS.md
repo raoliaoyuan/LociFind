@@ -6,7 +6,7 @@
 
 ## 📍 速览
 
-- **阶段**：B（Beta）进行中（最新 **v0.9.22**——在 v0.9.21〔BETA-53 本机 MCP 服务 + MCP token 两修〕基础上并入 **BETA-54 数字/编号检索修复**〔intent-parser 保留 ≥6 位数字串为关键词；此前 v0.9.21 桌面 app 号码搜不出〕，待重编真机测）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
+- **阶段**：B（Beta）进行中（最新 **v0.9.23**——发版线在 v0.9.21〔BETA-53 本机 MCP + token 两修〕上依次并入 **BETA-54 数字/编号检索修复** + **BETA-55 索引 Office 最后保存者**〔cp:lastModifiedBy 进 author FTS，支撑审计/离职「谁最后改的」检索〕，待重编真机测）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
 - **当前 task**：**2026-07-08 修复本机 MCP 服务 token 持久化分叉**（BETA-53 follow-up）——`update_settings` 全量覆写用旧快照把后端带外写的 token 冲成 null（双写者覆盖，非双数据目录）→ 401 静默失效；修为写盘前合并回磁盘现值的 MCP 两字段，+3 测试，编译验证靠 CI。BETA-53 主体仍 **done**：接 S1 只读挂载地基：server 加 `personal_local` 多 root 构造器 + `serve_bound`（真 socket 起停集成测试）；桌面 `mcp_service.rs` 四命令（`start/stop_mcp_service`/`mcp_service_status`/`reset_mcp_token`）复用桌面 embedder + 只读挂载 index.db、`127.0.0.1:8766`+随机 token+自启+持久化；前端 `McpPane.tsx`（开关/token 复制/配置片段/重置/安全提示）+ 工具菜单入口。验证 server 93 / desktop 174 / clippy·fmt·tsc+vite 全绿。**真机验证达成 → done**（功能 §2/§3/§4 + GUI 全流程 + **语义路径 B**〔`semantic-recall` 构建：`semantic=true` + 中文 query 命中英文文档跨语言召回〕三维均通过，[报告](docs/reviews/beta-53-mcp-service-verify-2026-07-07.md)；仅余可选「真 Claude Code 进程实连」，协议已 curl 验过）。
 - **下一步 top-3**：① **设计伙伴/首个真实部署主动获取**（护城河 P0，ROADMAP §5；BETA-40 真实内网证据/BETA-44 语料扩充均以此为前提）；② **macOS 真机整体待跑**（出场线 Class A 唯一剩项；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；③ BETA-53 可选复核：真 Claude Code 进程连 `~/.claude/settings.json` 走一遍（[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）。
@@ -39,6 +39,13 @@
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
 
+### 2026-07-08 — Claude Code (Opus 4.8) — v0.9.23：BETA-55 索引 Office 最后保存者
+
+**承接**：Codex（已走通 MCP）查「最后保存者为 燎原 的文档」0 命中——查证 `read_core_props` 只抽 `dc:creator`、`cp:lastModifiedBy` 完全没入索引。用户拍板做 BETA-55、在 `release/v0.9.22` 上实现。
+**产出**：`doc_extract.rs` `read_core_props` 加抽 `cp:lastModifiedBy`，经新 `combine_authors`（去重、空格连接）与 creator 合并进 `author` 列（trigram 可搜、零 schema 变更）；xlsx 走 calamine 原不读 core props，新 `read_ooxml_core_props_from_path` 另开 zip 补齐（.xls/.ods 降级 None）。docx/pptx/xlsx 一处覆盖。
+**结果**：indexer doc_extract **25 pass**（新增 combine_authors 单测 + docx 含最后保存者端到端 + 扩 core_props；creator-only 回归零变）；bump v0.9.23。生效需清空索引重建（存量 mtime skip）。
+**注意**：BETA-55 edits 一度误写进 main worktree、已 patch 搬到 `release/v0.9.22` 并还原 main。
+
 ### 2026-07-08 — Claude Code (Opus 4.8) — v0.9.22：BETA-54 数字检索并入发版线
 
 **承接**：Codex 接 MCP 真机验证中发现 v0.9.21 桌面 app 号码搜不出（`准考证` 命中但 `15013866` 0 命中）——BETA-54 修复（`main` 上 01d0c93）与 v0.9.21 token 修复线**岔开**，无分支同时含两者。
@@ -59,12 +66,4 @@
 **结果**：`cargo check --tests`〔locifind-desktop〕绿、`cargo test mcp_service` 4 pass（含新测）；前端仅改一处中文提示串。playbook §4 / ROADMAP BETA-53 同步。本 reset 小修与上条 401 分叉修复（同日并行会话）已一并并入 main（异文件、互不冲突）。
 **待验**：运行态自动重启的真机 401/200（需构建/起 app，本轮未做——复用已验的 start()/stop() 原语 + 单测覆盖停止态）。
 
-### 2026-07-07 V — Claude Code (Opus 4.8) — 桌面「本机 MCP 服务」BETA-53 S2/S3 code-done
-
-**承接**：接上轮 S1（`attach_readonly` 只读挂载地基），用户「按推荐执行」→ 一并做 S2/S3 推到 code-done + 补端到端闸门 + 收工。
-**产出**：① **server**——`DaemonConfigFile::personal_local(roots, token)`（桌面多 root 变体、全权 admin、`allow_full_read`）+ `app::serve_bound(listener, ctx, shutdown)`（axum 封装在 server 内、桌面侧免直依赖 axum）+ **真 socket 起停集成测试**（`/health` 200 · `/mcp` 无 token 401 · shutdown 5s 内优雅返回，5× 稳定）。② **桌面 `mcp_service.rs`**——`McpServiceState` + 四命令（`start/stop_mcp_service`/`mcp_service_status`/`reset_mcp_token`），复用桌面 embedder + 只读挂载 index.db、bind `127.0.0.1:8766`（同步拿端口占用错误）、随机 64-hex token、oneshot 优雅关停、开关态+token 持久化 settings.json、enabled 时自启。③ **前端 `McpPane.tsx`**——开关 / 运行状态〔地址·挂载条数·语义臂〕/ token 复制 / Claude Code 配置片段复制 / 重置令牌 / 安全提示；工具菜单入口〔`open-prefs-mcp`〕+ 选项页第八 tab。
-**关键决策**：内嵌复用（非子进程）；roots 仅供 `list_collections` 展示（读取面由索引 db 边界天然约束）；安全红线只绑 127.0.0.1 + token 必填随机 + 暴露面 UI 明示 + 重置即踢连接。
-**结果**：server lib 93 pass（+2）/ desktop 174 pass（+3）/ clippy `-D warnings`〔server·desktop·daemon〕/ fmt / tsc+vite 全绿；三方许可补 `getrandom`；设计文档 + ROADMAP BETA-53 标 code-done。
-**真机验证达成（同会话续跑）**：功能 §2/§3/§4（harness + 对实跑 app curl）+ computer-use 驱动 dev app GUI 全流程 + 语义路径 B（`semantic-recall` 构建 harness：`semantic=true` + 中文 query 命中英文文档跨语言召回）三维均通过 → BETA-53 转 done；仅余可选「真 Claude Code 进程实连」（协议已 curl 验过）。
-**发版**：bump **v0.9.20**（tauri.conf.json + Cargo.toml + Cargo.lock；含 BETA-53 本机 MCP 服务），推 `v0.9.20` tag 触发 release-windows.yml；Release changelog 补 MCP 服务用法 + 模型放置指引，待用户 Windows 真机测。
 

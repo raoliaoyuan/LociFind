@@ -5,6 +5,12 @@
 > 后续会话的详录写入 session-details-YYYY-MM.md、溢出摘要滚动追加到本文件。
 
 ---
+### 2026-07-07 V — Claude Code (Opus 4.8) — 桌面「本机 MCP 服务」BETA-53 S2/S3 code-done
+
+**承接**：接上轮 S1（`attach_readonly` 只读挂载地基），用户「按推荐执行」→ 一并做 S2/S3 推到 code-done + 补端到端闸门 + 收工。
+**产出**：① **server**——`DaemonConfigFile::personal_local(roots, token)`（桌面多 root 变体、全权 admin、`allow_full_read`）+ `app::serve_bound(listener, ctx, shutdown)`（axum 封装在 server 内）+ **真 socket 起停集成测试**（`/health` 200 · `/mcp` 无 token 401 · shutdown 5s 内优雅返回）。② **桌面 `mcp_service.rs`**——`McpServiceState` + 四命令，复用桌面 embedder + 只读挂载 index.db、bind `127.0.0.1:8766`、随机 64-hex token、oneshot 优雅关停、持久化 + enabled 时自启。③ **前端 `McpPane.tsx`**——开关/运行状态/token 复制/配置片段/重置/安全提示 + 工具菜单入口 + 选项页第八 tab。
+**结果**：server lib 93 / desktop 174 / clippy `-D warnings` / fmt / tsc+vite 全绿；三方许可补 `getrandom`。**真机验证达成**：功能 §2/§3/§4 + computer-use GUI 全流程 + 语义路径 B 三维均通过 → BETA-53 转 done。**发版 v0.9.20**（含 BETA-53 本机 MCP 服务）。
+
 ### 2026-07-07 IV — Claude Code (Opus 4.8) — daemon 正斜杠 root bug 修复 + 桌面本机 MCP 服务设计 & S1
 
 **承接**：用户问「能否工具菜单开关 BETA-43」→ 澄清诉求实为「让 Claude Code 经 MCP 检索本机文件」= **BETA-32 个人变体（非 BETA-43）**。本机跑通独立 daemon 验证（FTS-only、search 内容命中准考证），走通中发现 `read_document` round-trip bug → 用户「先查 bug 再实现 A」。
