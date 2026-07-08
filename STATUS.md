@@ -6,7 +6,7 @@
 
 ## 📍 速览
 
-- **阶段**：B（Beta）进行中（最新 **v0.9.24**——在 v0.9.23〔BETA-53 MCP + token 两修 + BETA-54 数字检索 + BETA-55 最后保存者，均已真机验证〕上并入 **BETA-56 短 CJK ≤2 字兜底**；双平台发布经 CI）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
+- **阶段**：B（Beta）进行中（最新 **v0.9.24**——在 v0.9.23〔BETA-53 MCP + token 两修 + BETA-54 数字检索 + BETA-55 最后保存者，均已真机验证〕上并入 **BETA-56 短 CJK ≤2 字兜底**；双平台发布经 CI）；**BETA-57 多词查询 AND→OR 兜底已并 main、待下个发版真机验**；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
 - **当前 task**：**2026-07-08 Codex 接 MCP 排查 → BETA-54/55 + v0.9.23 双平台发布 done**——用户观察「Codex 绕过 MCP 直连库」实为 Codex 从没挂上（Claude 风格 JSON 没进 Codex TOML；配法修好后现稳走 MCP，途中踩 token 轮换 / MSIX 环境变量需注销重登）。真机暴露并修两 gap：**BETA-54 数字检索**（intent-parser 保留 ≥6 位数字串）+ **BETA-55 索引最后保存者**（`cp:lastModifiedBy` 进 author FTS）。三分支（main BETA-54 / origin token 两修 / release）**收敛为单一 main** + **v0.9.23 双平台发布**（CI 修 clippy `manual_range_contains` + fmt 遗留后全绿）。并发会话另修 MCP token 两 bug（已并 main）+ 短 CJK ≤2 字兜底（BETA-56，memory `cjk-short-query-trigram-like-fallback`）。上一里程碑 BETA-53 本机 MCP 服务 done（v0.9.20）。
 - **下一步 top-3**：① **设计伙伴/首个真实部署主动获取**（护城河 P0，ROADMAP §5；BETA-40 真实内网证据/BETA-44 语料扩充均以此为前提）；② **macOS 真机整体待跑**（出场线 Class A 唯一剩项；**v0.9.23 macOS DMG 已产出、具备真机测试前提**；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；③ BETA-53 可选复核：真 Claude Code 进程连 `~/.claude/settings.json` 走一遍（[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）。
@@ -39,6 +39,12 @@
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
 
+### 2026-07-09 — Claude Code (Opus 4.8) — BETA-57 多词查询组间 AND→OR 召回兜底
+
+**承接**：用户经 MCP 查体检材料，报「`体检 体检报告 健康检查 健康体检` 泛查 0 命中、单词能命中」。诊断纠偏：并非我起初判的 `fts_sanitize` 短语化（那条只在无词组的 raw-text 兜底触发、生产不走），真因是 `fts_match_from_groups` **组间 AND**——parser 拆多词组、缺任一词即整条结构性归零。`爱康`(2 字正文词)另属 BETA-56 兜底不扫 body 的已知边界 + 验证 daemon 跑 dummy.gguf 语义臂死，非本次范围。
+**产出（方案 A：AND 优先 + 0 命中 OR 兜底）**：`search_results_expanded`（desktop+MCP 收敛点）AND 空且 ≥2 有效词组时经新 `fts_or_relax_from_groups` 放宽组间 OR 重试一次；零精确性回归（仅空时触发）；抽 `sanitized_group_terms` 消重。local-index +2 测试（单元 + 端到端复现体检报告场景 + AND 命中不受影响对照），29 全绿 / clippy `-D warnings` / fmt 净。查询侧改动**不需重建索引**。
+**待办**：locifindd/desktop 重编部署后真机 MCP 验证；随下个发版携带。分析层（「总结健康状态」）仍是外部 LLM 的活、LociFind 只管检索（范围决策不变）。
+
 ### 2026-07-08 — Claude Code (Opus 4.8) — Codex↔MCP 接线 + BETA-54/55 + v0.9.23 双平台发布
 
 **承接**：用户带 Codex 截图问「是否绕过 MCP」→ 实锤 Codex 从没挂上（Claude JSON 没进 Codex TOML）；修接线后稳走 MCP（详见「当前 Task」）。
@@ -52,12 +58,5 @@
 **根因**：**非**双数据目录（后端与 UI 同写 `app_config_dir/settings.json`）；实为**双写者覆盖**——MCP token/enabled 后端带外写盘，偏好表单 `update_settings` 全量覆写时用挂载期旧快照把其冲成 null，运行中 axum server 仍持内存旧 token → 401 静默失效。
 **产出**：[settings.rs](apps/desktop/src-tauri/src/settings.rs) `update_settings` 改为写盘前读磁盘、合并回后端带外管理的 `mcp_service_enabled`/`mcp_service_token`（`merge_backend_managed_mcp_fields` + 可测 `update_settings_at` 内核），磁盘成 MCP 两字段唯一信源；`settings.rs` +2 测试（clobber 回归 / 首存无文件）、[mcp_service.rs](apps/desktop/src-tauri/src/mcp_service.rs) +1 测试（status↔磁盘 token 一致守卫）；doc_markdown·field_reassign 已按 CI pedantic 核对。
 **未尽事宜**：本机无 MSVC 工具链无法本地 `cargo test`/clippy，编译验证靠 CI；未 bump 版本，随下个发版携带。（详录 → docs/session-logs/session-details-2026-07.md）
-
-### 2026-07-08 — Claude Code (Opus 4.8) — MCP 令牌重置 UX 小修（发版后）
-
-**承接**：任务据「Codex 接 MCP 排查」印象报「面板只弹一次 token + 缺重置按钮」→ 复现发现二者早在 e1f3048（2026-07-07）已具备（token 随 3s 轮询常驻、重置按钮在列），任务描述来自旧装机版。用户拍板：把唯一真实缺口——`reset_token` 停服务后需手动重启——**改为自动重启**。
-**产出**：`mcp_service.rs` `reset_token` 记录重置前运行态，停服务（踢旧连接，§5.2）+ 轮换 token 后，**若原本在跑则自动 `start()` 复用新 token 重启**（旧 token 立即 401、新 token 立即 200，免手动重开）；停止态则仅换 token。`McpPane.tsx` 重置提示文案同步；补停止态轮换 `#[tokio::test]`。
-**结果**：`cargo check --tests`〔locifind-desktop〕绿、`cargo test mcp_service` 4 pass（含新测）；前端仅改一处中文提示串。playbook §4 / ROADMAP BETA-53 同步。本 reset 小修与上条 401 分叉修复（同日并行会话）已一并并入 main（异文件、互不冲突）。
-**待验**：运行态自动重启的真机 401/200（需构建/起 app，本轮未做——复用已验的 start()/stop() 原语 + 单测覆盖停止态）。
 
 

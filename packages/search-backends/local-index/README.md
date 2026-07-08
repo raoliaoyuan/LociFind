@@ -47,6 +47,9 @@ let (music_stats, doc_stats, image_stats) =
 - CJK 查询需 ≥3 字符（继承 indexer 的 trigram tokenizer 限制）——`fts_match_from_groups`
   已剔除词组内 <3 字纯 CJK 词项使其不参与 AND 匹配（BETA-42，避免短词拖垮多词组合查询
   结构性 0 命中），但该短词本身仍无法单独被本地 FTS 匹配到。
+- 多词查询组间 AND：`search_results_expanded` 先按组间 AND 查，**0 命中且 ≥2 有效词组时**
+  经 `fts_or_relax_from_groups` 放宽成组间 OR 兜底重试一次（BETA-57，修多词自然语言泛查
+  「缺任一词即整条归零」的召回缺陷）——仅 AND 空时触发，已命中查询行为不变、零精确性回归。
 
 ## 测试
 
