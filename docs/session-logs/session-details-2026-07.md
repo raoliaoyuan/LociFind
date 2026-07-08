@@ -2,6 +2,36 @@
 
 > STATUS.md 只放摘要；本文件按月留改动概览、验证输出、决策细节。最新在顶部。
 
+## 2026-07-08 — Claude Code (Opus 4.8) — BETA-54 数字/编号检索 gap 修复 + Codex↔MCP 接线
+
+### 承接
+用户带 Codex 截图（找含电话号码 150138 的文件，Codex 一路 curl `127.0.0.1:8766` → 精确搜 0 命中 → 转而直接 `sqlite3` 打桌面 index.db 的 `documents_fts` LIKE 命中）问「Codex 感觉绕过了 MCP 直连索引库，是不是有问题」。
+
+### 诊断链（三步定性）
+1. **纠错自己的第一判断**：初答误称「FTS 按整词匹配、数字前缀匹不上」；读 `packages/indexer/src/doc_db.rs:36` / `db.rs:8-10` 实锤 FTS 用 **trigram** tokenizer（≥3 字符任意子串可匹配，含数字），前判作废。
+2. **audit 铁证机制**：`packages/locifind-server/src/audit.rs` → daemon 每成功 `search` 往 `<data_dir>/audit.jsonl` 追加一行（ts/subject/action:search/collections/query/results）；直连 sqlite 不留痕 → 成为「走没走 MCP」的判据。
+3. **实锤 Codex 从没连上 MCP**：读 `~/.codex/config.toml` + `.codex-global-state.json`——只有 `node_repl` 一个 mcp_server，用户此前贴的 Claude 风格 `{"mcpServers":{...}}` JSON **格式不通**（Codex 只认 TOML `[mcp_servers.name]`），从没落进配置。所有「绕行」= agent 无工具时的自救，非 Codex 乱来。
+
+### Codex↔MCP 接线修复
+- `codex-cli 0.142.5` 原生支持 streamable HTTP MCP。`setx LOCIFIND_MCP_TOKEN <token>` + `codex mcp add locifind-local --url http://127.0.0.1:8766/mcp --bearer-token-env-var LOCIFIND_MCP_TOKEN`（token 走环境变量不落明文进 config）。
+- 端到端验证：`/health` 200；MCP `initialize`/`tools/list`（返 `search`/`list_collections`/`read_document`）/`tools/call search 仙本那`=3 命中带 snippet + `audit.jsonl` 新增 search 行。中文 query 经 Git Bash curl 会编码乱码，改 Python urllib 发。
+- **踩坑**：① 服务是 `locifind-desktop.exe` 进程内托管（非独立 locifindd），app 关即 `/health` 000；② token 轮换——旧 `1901d35a…` 401；③ 面板 token 只在启用瞬间弹一次、之后不可复看，且「重置令牌」按钮**文案有控件缺**；④ 双 settings 路径（`Roaming\ai.locifind.desktop\settings.json` 显示 enabled:false/token:null 而服务在跑）——Tauri vs dirs 老坑。最终用户 reset 取新 token `0018e452…` 打通。
+
+### BETA-54 检索层 bug（真机复现 + 修 + 验）
+- **复现**（经真 MCP，audit 留痕）：`search 150138`/`440307`/`15013866763`/`440307201312314812`→0；`准考证`→1（命中同一含号码 png）；`仙本那`→3。证明文件在索引里、号码搜不出 = 检索层 gap。
+- **根因**：`packages/intent-parser/src/parsers/file_search.rs` `extract_en_residual_keywords` 的 `is_signal` 判据含 `|| tok.chars().all(|c| c.is_ascii_digit())`——纯数字 token 一律当噪声 flush 丢弃（本意剥年份/尺寸/日号），电话/案号/身份证号连带遭殃 → keywords=None → daemon `expand_intent_for_daemon` 无 group → FTS 臂无检索词 → 0。诊断佐证：`电话 15013866763`→0（电话不在文档、号码没起作用）、`准考证 150138`→1（靠中文词命中）。
+- **修法**：新增 `IDENTIFIER_DIGIT_MIN=6` + `is_incidental_number(tok)`（纯数字**且 <6 位**才算噪声；≥6 位视为标识符保留为字面 keyword），替换该判据。desktop `search.rs:474` 与 daemon `search.rs` 共用 `intent_parser::parse`，**一改两受益**。
+- **测试**：intent-parser `cargo test` 242 全绿；新增 4 项（`incidental_number_threshold` / `long_digit_run_kept_as_keyword`〔含 `invoice 15013866763` 合成短语，daemon 再按空格拆〕/ `short_number_still_stripped`〔2024/100 仍 None，守 date-size 零回归〕/ `parse_bare_number_keeps_number_keyword`）。
+- **真机 MCP 验证**：`scripts\build-locifindd-llama.bat` 重编 locifindd（1m35s，重编 intent-parser+server+daemon）→ 挂含号码 .txt 语料到 `:8788`（token 全 1、model 复用 embeddinggemma-300m）→ 经 HTTP MCP 实搜：`150138`/`440307`/`15013866763`/`440307201312314812` **0→1 命中**、`2024` 仍 **0**（阈值有效）、`仙本那` 对照命中。A/B 对照旧 8766 desktop MCP（`150138`/`440307`=0）成立。停临时 daemon，8766 未动。
+
+### 生效边界与后续
+- 修复在 `intent-parser`，桌面 app（含其进程内 8766 MCP）要 pick 上须**出带本改动的新版本**；当前跑的 8766 仍旧码——用户重启 Codex 后 `仙本那`/普通词能走 MCP，`150138` 类仍需新桌面版。
+- 附带两 token bug 派后台会话：`task_7260d343`（token UX：常驻查看/复制 + 补「重置令牌」按钮）、`task_06f499be`（双 settings 路径分叉）——在各自 worktree 处理，本会话不碰 mcp_service/settings/UI。
+- ROADMAP 登 BETA-54（done 代码层，依赖 BETA-50/53）。
+
+### 结果
+仅改 `packages/intent-parser/src/parsers/file_search.rs`（+71/-1，含 4 测试）。intent-parser 242 pass。真机 MCP A/B 验证达成。
+
 ## 2026-07-06（续 3）— Claude Code (Fable 5) — v0.9.16/17 双发版 + 真机反馈二轮修复
 
 ### 承接
