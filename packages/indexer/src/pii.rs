@@ -131,6 +131,8 @@ fn has_ascii_alnum_after(text: &str, index: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
 
     fn synth_identity_card(prefix17: &str) -> String {
