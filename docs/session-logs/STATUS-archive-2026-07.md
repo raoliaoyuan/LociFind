@@ -5,6 +5,16 @@
 > 后续会话的详录写入 session-details-YYYY-MM.md、溢出摘要滚动追加到本文件。
 
 ---
+### 2026-07-09 — Claude Code (Opus 4.8) — BETA-60 检索+索引性能优化（双赛道并行）
+
+**承接**：用户真机反馈搜「身份证」1965ms（fan-out local+semantic+windows+everything 四臂）+ 索引慢，要 Claude Code 当项目经理分派本地 Claude CLI 与 Codex CLI 并监督、尽量不打扰、下版问题都解决。**诊断**（两 Explore 代理并行摸链路）：搜索 fan-out `fanout_merge.rs` 串行 await 各后端耗时**相加**、Windows Search 每查 spawn powershell+ADODB 冷启动是最大单头；索引 `scan.rs` walk 单线程 + 每文件事务 + **未开 WAL**（每文件 fsync）+ 提取/OCR 无并发。**分派**（文件不重叠双赛道并行）：Track A 搜索并发化（本地 Claude 子代理，harness+desktop）、Track B 索引提速（Codex CLI `codex exec --sandbox workspace-write`，indexer），两者禁碰 git/STATUS/ROADMAP。**产出**：A = harness 抽纯 fuse 函数（语义逐字节等价、daemon 路径改调它）+ desktop `concurrent_collect` 用 `spawn_blocking`+`block_on` 并发查各后端按原序回收（求和→取最慢）；B = 文件型库开 WAL+`synchronous=NORMAL`（内存库兜底）+ `scan.rs` 128/块 rayon 并行提取（串行预检→并行提取→串行写库/进度）。**复核**：逐段核 desktop 并发编排取消/兜底/顺序对齐；Codex 首版全量堆内存 → 令其改分块（限内存尖峰+保实时进度）；集成 `cargo check -p locifind-desktop`〔server/backends 调用方随 `Send`/`Sync` bound 一起过〕+ harness 191/indexer 194/clippy/fmt 全绿。**未尽**：Windows/Everything 常驻宿主、embedding batch/context 复用（涉 RAM/共享 runtime 风险高本轮不做）、fan-out 软超时。搜索不需重建索引、WAL/并行提取下次构建生效。待发 **v0.9.27**。
+
+---
+### 2026-07-09 — Claude Code (Opus 4.8) — 分派两 CLI 落地 BETA-58/59（MCP 接入体验 + PII 概念检索）
+
+**承接**：用户带 Codex 查身份证文件全程截图，要求 Claude Code 当项目经理、把优化任务分派给本地 Claude CLI 与 Codex CLI 并监督完成，尽量不打扰用户、下版测试时问题都解决。**关键决策**：拆两条**文件不重叠**赛道并行——前端（TS，`apps/desktop`）分本地 Claude 子代理、Rust（`packages/**`）分 Codex CLI（`codex exec --sandbox workspace-write`），两者禁碰 STATUS/ROADMAP 与 git，收工归并由 Claude Code 统一做。**产出**：BETA-58（接入体验）+ BETA-59（PII 概念检索）均 done、并入 main 待发版（详见「当前 Task」+ ROADMAP）；Claude Code 复核双 diff、补 curl 的 PowerShell 提示 + doc_db 注入点权衡注释、跑通 tsc/clippy/test。**未尽事宜**：待推 **v0.9.26**（含 BETA-57/58/59）触发 CI 双平台发布；BETA-59 生效需重建索引；后续可提 `entity` 独立 FTS 列消除 snippet 注入词回显边缘。
+
+---
 ### 2026-07-09 — Claude Code (Opus 4.8) — BETA-57 多词查询组间 AND→OR 召回兜底
 
 **承接**：用户经 MCP 查体检材料，报「`体检 体检报告 健康检查 健康体检` 泛查 0 命中、单词能命中」。诊断纠偏：并非我起初判的 `fts_sanitize` 短语化（那条只在无词组的 raw-text 兜底触发、生产不走），真因是 `fts_match_from_groups` **组间 AND**——parser 拆多词组、缺任一词即整条结构性归零。`爱康`(2 字正文词)另属 BETA-56 兜底不扫 body 的已知边界 + 验证 daemon 跑 dummy.gguf 语义臂死，非本次范围。
@@ -14,7 +24,7 @@
 ---
 ### 2026-07-08 — Claude Code (Opus 4.8) — Codex↔MCP 接线 + BETA-54/55 + v0.9.23 双平台发布
 
-**承接**：用户带 Codex 截图问「是否绕过 MCP」→ 实锤 Codex 从没挂上（Claude JSON 没进 Codex TOML）；修接线后稳走 MCP（详见「当前 Task」）。
+**承接**：用户带 Codex 截图问「是否绕过 MCP」→ 实锤 Codex 从没挂上（Claude JSON 没进 Codex TOML）；修接线后稳走 MCP。
 **BETA-54 数字检索**：`file_search.rs` `extract_en_residual_keywords` 无条件剥纯数字 → `is_incidental_number`（<6 位才剥），desktop+MCP 共用 `parse` 一改两受益；242 测试。
 **BETA-55 索引最后保存者**：`doc_extract.rs` `read_core_props` 加抽 `cp:lastModifiedBy` 经 `combine_authors` 并入 author FTS，xlsx 另开 zip 补 core props；doc_extract 25 pass。生效需清空索引重建。
 **发布**：三分支收敛为单一 main（cherry-pick playbook + 强推 origin/main）；本机出 Windows 装机版真机验（`15013866` 命中 / author 带最后保存者）→ **v0.9.23 tag → 双平台发布**；CI 修 clippy `manual_range_contains` + fmt 遗留后全绿，macOS npm ERESOLVE flake 重跑过。**收尾**：清后台 worktree（2 个已并入的删了）+ **BETA-56 短 CJK 兜底 cherry-pick 并入 main**（indexer +4/local-index +1，本机 fmt/clippy/test 全过；待下个发版）。派生 task：短 CJK（done BETA-56）/ token UX / npm lockfile。

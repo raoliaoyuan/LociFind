@@ -180,8 +180,9 @@ let hits = idx.query(&DocumentQuery {
 // hits[i].entry 元信息；hits[i].snippet = FTS5 命中片段（仅文本查询）
 ```
 
-`documents` 主表 + 独立 `documents_fts` FTS5 表（title/author/body）；正文只进 FTS。
-查询排序 `modified_time DESC`（近期优先）。
+`documents` 主表 + 独立 `documents_fts` FTS5 表（title/author/body/entity）；正文只进 FTS。
+查询排序 `modified_time DESC`（近期优先）。老库（3 列）打开自动迁移加 `entity` 列、逐行保留
+body（透明加列、无 schema bump）。
 
 **文件级提取失败留痕**（BETA-40 收尾，2026-07-04）：整份文件提取失败（不支持的 PDF
 编码 / OCR 依赖缺失 / 畸形文件）落 `index_failures(path, reason, failed_time)` 表——
@@ -189,10 +190,13 @@ let hits = idx.query(&DocumentQuery {
 `extraction_failures()` / `extraction_failure_count()`。与 `document_failed_pages`
 （扫描 PDF **页级**失败）互补。音乐库暂不留痕（`IncrementalStore` 默认 no-op）。
 
-**PII 类型概念词召回**：写入 `documents_fts.body` 前会对正文做轻量 PII 类型识别，仅在命中
-中国大陆身份证号（18 位且 GB 11643 校验位正确）或手机号（`1[3-9]\d{9}`）时追加
-“身份证 / 手机号”等**类型关键词**，用于「查找包含身份证信息的文件」这类概念查询；不会把识别到的
-号码复制到任何新字段。存量索引需清空或重建后才会具备该召回能力。
+**PII 类型概念词召回**（BETA-59 重构：独立 `entity` 列）：索引时对正文做轻量 PII 类型识别，
+仅在命中中国大陆身份证号（18 位且 GB 11643 校验位正确）或手机号（`1[3-9]\d{9}`）时，把
+“身份证 / 手机号”等**类型关键词**写进 `documents_fts.entity`（末列，非 body），用于
+「查找包含身份证信息的文件」这类概念查询；不会把识别到的号码复制到任何字段。查询用裸
+`documents_fts MATCH` 自动跨所有列，概念词照样命中 entity；而 `snippet()` 固定取 body 列
+（index 2）、永不回显 entity 关键词——彻底隔离"可搜的类型标签"与"展示的出处片段"。存量索引
+entity 列迁移后为空、待下次内容变更增量重抽时回填（老正文 body 已保、搜索不受影响）。
 
 ### known limitation
 
