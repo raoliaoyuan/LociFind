@@ -39,6 +39,34 @@ pub const MCP_SERVICE_PORT: u16 = 8766;
 const TOKEN_RANDOM_BYTES: usize = 32;
 /// 认可的最短既存 token 长度（低于此视为损坏 / 旧格式，重新生成）。
 const MIN_ACCEPTED_TOKEN_LEN: usize = 32;
+/// 端口占用（`AddrInUse`）时的最大重试次数——覆盖 app 重启时旧实例 socket 落停的短窗口。
+const BIND_MAX_RETRIES: u32 = 6;
+/// 每次重试前的等待（总窗口 ≈ `BIND_MAX_RETRIES` × 此值 ≈ 3s）。
+const BIND_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// 绑定监听端口，端口占用（`AddrInUse` / Windows `os error 10048`）时有界重试。
+///
+/// **Why**：single-instance 插件的进程锁**先于** 8766 的 OS socket 释放——app 重启时新实例
+/// 已过单例闸、但旧实例的 listener 还没落停，首绑就撞 `AddrInUse`。旧逻辑「一次 bind 失败
+/// 即告警放弃」会让重启后 MCP 服务**静默死掉**（`/health` 拒连），直到用户手动开关或再重启；
+/// 本机真机实锤（Codex 连不上退回手搓 grep）。有界重试等旧 listener 收尾即可自愈；仍失败
+/// （真有另一活实例长期占用）则如实返回，不无限重试。其余错误立即上抛。
+async fn bind_with_retry(addr: SocketAddr) -> std::io::Result<TcpListener> {
+    let mut attempt = 0u32;
+    loop {
+        match TcpListener::bind(addr).await {
+            Ok(listener) => return Ok(listener),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::AddrInUse && attempt < BIND_MAX_RETRIES =>
+            {
+                attempt += 1;
+                warn!(%addr, attempt, "MCP 端口被占用，等待旧监听释放后重试");
+                tokio::time::sleep(BIND_RETRY_DELAY).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
 
 /// 运行中的服务句柄（内部）。
 struct RunningService {
@@ -214,8 +242,9 @@ impl McpServiceState {
             .map_or(0, |c| c.state.read().doc_count);
 
         // ---- bind（同步拿端口占用错误反馈 UI）+ spawn server task ----
+        // AddrInUse 有界重试：app 重启时旧实例 socket 未落停会撞 os 10048（见 bind_with_retry）。
         let addr = SocketAddr::from(([127, 0, 0, 1], MCP_SERVICE_PORT));
-        let listener = TcpListener::bind(addr)
+        let listener = bind_with_retry(addr)
             .await
             .map_err(|e| format!("绑定 {addr} 失败（端口可能被占用，或已有另一实例在跑）: {e}"))?;
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
@@ -344,6 +373,23 @@ mod tests {
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
         assert!(a.len() >= MIN_ACCEPTED_TOKEN_LEN);
         assert_ne!(a, b, "两次生成应不同（随机）");
+    }
+
+    /// `bind_with_retry` 自愈守卫：端口先被占、短暂后释放 → 重试窗口内应绑定成功，
+    /// 而非旧逻辑的「首绑失败即放弃」。坐实 app 重启端口竞态可自愈。
+    #[tokio::test]
+    async fn bind_with_retry_recovers_after_port_frees() {
+        // 高位端口避开 8766 真机服务 + 其他测试。
+        let addr: SocketAddr = "127.0.0.1:18766".parse().unwrap();
+        let holder = TcpListener::bind(addr).await.expect("测试端口应空闲");
+        // 后台 ~700ms 后释放（落在 6×500ms 重试窗口内）。
+        let releaser = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+            drop(holder);
+        });
+        let bound = bind_with_retry(addr).await;
+        releaser.await.unwrap();
+        assert!(bound.is_ok(), "端口释放后重试应绑定成功: {bound:?}");
     }
 
     /// effective_roots 反映 index_roots + include_system_defaults（复用 settings 解析）。

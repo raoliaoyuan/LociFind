@@ -5,6 +5,11 @@
 > 后续会话的详录写入 session-details-YYYY-MM.md、溢出摘要滚动追加到本文件。
 
 ---
+### 2026-07-09 — Claude Code (Opus 4.8) — BETA-59 独立 `entity` 列重构（PII 类型词与展示正文隔离）
+
+**承接**：BETA-59 首版 PII 类型词并入 `documents_fts.body`，遗留「正文无字面标签、仅命中注入词时 `snippet()` 回显关键词尾巴」的出处观感缺陷（非隐私/正确性）。**产出**：`documents_fts` 加末列 `entity`（列序 title=0/author=1/body=2/entity=3 不变），类型词改写 `entity`——`query` 裸 `MATCH` 自动跨列命中，`snippet()`/`preview` 固定 body 列**永不回显** entity；`pii.rs` `append_pii_keywords_for_fts`→`pii_entity_keywords`。**迁移不 bump schema**：`migrate_documents_fts_entity` 就地**拷 body 进新 4 列表再 drop+rename**（body 是正文唯一存处、不能仿 `migrate_music_fts` 从主表重建；entity 灌空待增量回填），升级无运行时崩（4 列 INSERT 只在迁移后跑）、老正文照常可搜，与既有两处"透明加列"同套路；bump 版本逼全库重建代价不划算故舍。indexer 195/197 + server 93 全绿、clippy `-D warnings`/fmt 净（+entity 命中/snippet 不回显/3 列老库迁移保 body 三测）。已 rebase 到 v0.9.29、与 BETA-60 WAL/分块提取同文件融合；**PR [#6](https://github.com/raoliaoyuan/LociFind/pull/6)**。
+
+---
 ### 2026-07-09 — Claude Code (Opus 4.8) — BETA-60 检索+索引性能优化（双赛道并行）
 
 **承接**：用户真机反馈搜「身份证」1965ms（fan-out local+semantic+windows+everything 四臂）+ 索引慢，要 Claude Code 当项目经理分派本地 Claude CLI 与 Codex CLI 并监督、尽量不打扰、下版问题都解决。**诊断**（两 Explore 代理并行摸链路）：搜索 fan-out `fanout_merge.rs` 串行 await 各后端耗时**相加**、Windows Search 每查 spawn powershell+ADODB 冷启动是最大单头；索引 `scan.rs` walk 单线程 + 每文件事务 + **未开 WAL**（每文件 fsync）+ 提取/OCR 无并发。**分派**（文件不重叠双赛道并行）：Track A 搜索并发化（本地 Claude 子代理，harness+desktop）、Track B 索引提速（Codex CLI `codex exec --sandbox workspace-write`，indexer），两者禁碰 git/STATUS/ROADMAP。**产出**：A = harness 抽纯 fuse 函数（语义逐字节等价、daemon 路径改调它）+ desktop `concurrent_collect` 用 `spawn_blocking`+`block_on` 并发查各后端按原序回收（求和→取最慢）；B = 文件型库开 WAL+`synchronous=NORMAL`（内存库兜底）+ `scan.rs` 128/块 rayon 并行提取（串行预检→并行提取→串行写库/进度）。**复核**：逐段核 desktop 并发编排取消/兜底/顺序对齐；Codex 首版全量堆内存 → 令其改分块（限内存尖峰+保实时进度）；集成 `cargo check -p locifind-desktop`〔server/backends 调用方随 `Send`/`Sync` bound 一起过〕+ harness 191/indexer 194/clippy/fmt 全绿。**未尽**：Windows/Everything 常驻宿主、embedding batch/context 复用（涉 RAM/共享 runtime 风险高本轮不做）、fan-out 软超时。搜索不需重建索引、WAL/并行提取下次构建生效。待发 **v0.9.27**。
