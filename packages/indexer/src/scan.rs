@@ -18,9 +18,16 @@ use crate::progress::{IndexProgress, NoopProgress};
 use crate::IndexError;
 
 /// 并行提取分块大小。进度 `on_file` 已下沉到并行段逐文件上报（见下），故分块**只用于
-/// 限制内存尖峰**（一次最多驻留一块的正文提取结果），不影响进度粒度；峰值并行度由 rayon
-/// 全局线程池（≈核数）决定、与本值无关。取中等值兼顾内存与串行写库批量。
+/// 限制内存尖峰**（一次最多驻留一块的正文提取结果），不影响进度粒度；峰值并行度由下方
+/// 受限线程池（[`EXTRACT_PARALLELISM`]）决定、与本值无关。取中等值兼顾内存与串行写库批量。
 const EXTRACT_CHUNK: usize = 64;
+
+/// 提取阶段并发上限。**关键**：扫描版 PDF 的提取会 spawn `pdftoppm` 渲染整份 PDF（一份一
+/// 进程、200 DPI 很吃 CPU/内存）再逐页 OCR（又各 spawn 子进程）。若按核数无限并行，多份
+/// 扫描 PDF 会瞬间起几十个 `pdftoppm`/OCR 子进程互抢 CPU/IO，机器被打爆、整体反而更慢
+/// （v0.9.27 真机首索引 50 文件卡「0/50」十分钟、17 个 pdftoppm 并发实锤）。故用**受限
+/// 线程池**把同时进行的重量级提取压到少数几个：既保留多文件并行的提速，又不放任子进程风暴。
+const EXTRACT_PARALLELISM: usize = 4;
 
 /// 增量索引的存储后端抽象（音乐 / 文档各 impl 一份）。
 pub(crate) trait IncrementalStore {
@@ -264,6 +271,7 @@ struct ExtractCandidate {
     modified_secs: i64,
 }
 
+#[allow(clippy::too_many_lines)] // 承载整轮：串行预检 + 受限池并行提取 + 串行写库 + 删除回收
 pub(crate) fn run_incremental_index_with_filter_and_progress<S, F, N, P>(
     store: &S,
     roots: &[PathBuf],
@@ -335,12 +343,24 @@ where
 
     // 提取器（lofty / pdf-extract / OCR 等）可能很重；并行段只做文件读取/解析，不碰 DB。
     // 按块处理，避免十万级文档把正文提取结果一次性堆到内存里；块内仍使用 rayon 并行。
-    for chunk in to_extract.chunks(EXTRACT_CHUNK) {
-        // 并行提取：每个文件一提取完就**立即** on_file 报进度。`IndexProgress` 是 Send+Sync、
-        // 专为跨线程调用设计，故可在 rayon 工作线程里调。这样 UI 计数器随每个文件前进，
-        // 不被整块 rayon barrier 冻住——即便块内有个慢文件（大 PDF / 图片 OCR），其余文件
-        // 仍各自报进度（修 BETA-60 首版把 on_file 放块尾串行段、一块内进度全冻、用户误判卡死）。
-        let extracted: Vec<_> = chunk
+    // 受限提取线程池：把重量级提取（尤其扫描 PDF 的 pdftoppm 渲染 + 逐页 OCR）的并发压到
+    // EXTRACT_PARALLELISM，避免子进程风暴打爆机器。取本值与机器核数的较小者（低核机不超订）。
+    // 构建失败（极罕见）→ None、退回 rayon 全局池（旧行为）。
+    let n_threads = EXTRACT_PARALLELISM.min(
+        std::thread::available_parallelism()
+            .map_or(EXTRACT_PARALLELISM, std::num::NonZeroUsize::get),
+    );
+    let extract_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(n_threads)
+        .build()
+        .ok();
+
+    // 单块提取：每个文件一提取完就**立即** on_file 报进度。`IndexProgress` 是 Send+Sync、
+    // 专为跨线程调用设计，故可在 rayon 工作线程里调。这样 UI 计数器随每个文件前进，
+    // 不被整块 rayon barrier 冻住——即便块内有个慢文件（大 PDF / 图片 OCR），其余文件
+    // 仍各自报进度（修 BETA-60 首版把 on_file 放块尾串行段、一块内进度全冻、用户误判卡死）。
+    let extract_chunk = |chunk: &[ExtractCandidate]| -> Vec<Result<S::Entry, IndexError>> {
+        chunk
             .par_iter()
             .map(|candidate| {
                 let result =
@@ -349,7 +369,15 @@ where
                 progress.on_file(&candidate.path, &candidate.ext, result.is_ok());
                 result
             })
-            .collect();
+            .collect()
+    };
+
+    for chunk in to_extract.chunks(EXTRACT_CHUNK) {
+        // 在受限池内跑本块提取（池不可用则退回全局池）。
+        let extracted = match &extract_pool {
+            Some(pool) => pool.install(|| extract_chunk(chunk)),
+            None => extract_chunk(chunk),
+        };
 
         // 串行写库（DB 单 writer）：仅 upsert / 失败留痕 / stats，进度已在并行段报过、此处不再 on_file。
         for (candidate, result) in chunk.iter().zip(extracted) {
