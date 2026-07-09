@@ -1,8 +1,8 @@
 # LociFind
 
-**Local search for humans** — 跨平台（macOS + Windows）本地语义检索底座。开源免费，MIT OR Apache-2.0 双许可。
+**Local search for Agents & Huamns** — 跨平台（macOS + Windows）文档检索服务。开源免费，MIT OR Apache-2.0 双许可。
 
-用自然语言**按意思**查找电脑里的文件、文档、音乐、图片、截图——记不清文件名、跨中英文也能找到，无需学习 Spotlight 操作符或 Everything 通配符语法。一切本地处理，默认不联网。同一检索栈另有 headless daemon 形态（`locifindd`），面向团队冷归档场景经 MCP 接入 LLM 工作流。项目定位与目标场景以 [PROJECT.md](./PROJECT.md) 为准。
+支持自然语言的语义检索、关键字的文本检索、元数据等文件属性检索等，查找电脑里的文件、文档、音乐、图片、截图——记不清文件名、跨中英文也能找到，无需学习 Spotlight 操作符或 Everything 通配符语法。一切都在本地处理，不联网不上传数据。另有 headless daemon 形态（`locifindd`），面向团队冷归档场景经 MCP 接入 LLM 工作流。项目定位与目标场景以 [PROJECT.md](./PROJECT.md) 为准。
 
 ---
 
