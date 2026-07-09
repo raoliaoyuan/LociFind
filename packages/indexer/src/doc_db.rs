@@ -16,7 +16,7 @@ use crate::model::{
     DocumentEntry, DocumentHit, DocumentPreview, DocumentQuery, ExtractedDoc, ExtractionFailure,
     PageFailure, PagePassage,
 };
-use crate::pii::append_pii_keywords_for_fts;
+use crate::pii::pii_entity_keywords;
 use crate::scan::IncrementalStore;
 use crate::version::ensure_schema_version;
 use crate::IndexError;
@@ -35,8 +35,11 @@ CREATE TABLE IF NOT EXISTS documents (
   content_hash  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_documents_modified ON documents(modified_time);
+-- 列序固定：title=0, author=1, body=2, entity=3（`query` 的 `snippet()` 硬编码 body=2、
+-- 迁移与查询都依赖此序，勿重排）。`entity`（BETA-59）存 PII 类型概念词（身份证/手机号），
+-- 与 body 隔离：`MATCH` 裸表达式自动跨所有列可搜到 entity，`snippet()` 固定 body 列不回显。
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
-  title, author, body,
+  title, author, body, entity,
   tokenize='trigram'
 );
 CREATE TABLE IF NOT EXISTS document_vectors (
@@ -143,6 +146,9 @@ impl DocumentIndex {
         conn.execute_batch(SCHEMA)?;
         // BETA-38：老库 documents 表无 content_hash 列 → ALTER ADD（列可空、无需 schema-bump）。
         migrate_documents_content_hash(&conn)?;
+        // BETA-59：老库 documents_fts 只有 title/author/body 三列 → 加 entity 末列。
+        // **必须在任何 4 列 INSERT 之前跑**，否则升级用户首次 upsert 就会列数不匹配崩。
+        migrate_documents_fts_entity(&conn)?;
         // BETA-32 C1b：老 db 第一次打开 → INSERT schema 版本；已有则 no-op。
         ensure_schema_version(&conn)?;
         Ok(Self { conn })
@@ -380,17 +386,16 @@ impl DocumentIndex {
             tx.last_insert_rowid()
         };
 
-        // FTS 刷 body（同 upsert_document）。PII 只注入类型关键词，绝不复制号码明文；
-        // 存量索引需重建后才具备这些概念词召回。
-        // 已知权衡：关键词并入 body（正文只存 FTS），当查询**仅**命中注入词（文档正文
-        // 无「身份证」等字面标签、只有裸号码）时，`snippet()` 可能回显这截关键词。多数
-        // 证件/准考证扫描件正文自带「身份证号」标签、不触发；后续可提为独立 `entity` FTS 列
-        // 彻底隔离（MATCH 自动跨列可搜、snippet 仍固定 body 列），代价是 documents_fts 加列迁移。
-        let fts_body = append_pii_keywords_for_fts(body);
+        // FTS 刷 body：正文原样进 body 列。PII 类型概念词（身份证/手机号）单独进 entity 列
+        // （BETA-59 重构）——只写类型词、绝不复制号码明文。`query` 用裸 `documents_fts MATCH`
+        // 自动跨所有列，「身份证」等概念词照样命中 entity；而 `snippet()` 固定打 body 列
+        // （index 2）、永不回显 entity 关键词，彻底隔离"可搜的类型标签"与"展示的正文"。
+        // 存量索引 entity 列迁移后为空、待下次内容变更增量重抽时回填（body 已保、搜索不受影响）。
+        let entity = pii_entity_keywords(body);
         tx.execute("DELETE FROM documents_fts WHERE rowid = ?1", [id])?;
         tx.execute(
-            "INSERT INTO documents_fts(rowid, title, author, body) VALUES (?1,?2,?3,?4)",
-            params![id, e.title, e.author, fts_body],
+            "INSERT INTO documents_fts(rowid, title, author, body, entity) VALUES (?1,?2,?3,?4,?5)",
+            params![id, e.title, e.author, body, entity],
         )?;
 
         // 幂等：先清后写。空 vec 时 INSERT 循环空转、DELETE 空表安全。
@@ -1075,6 +1080,46 @@ fn migrate_documents_content_hash(conn: &Connection) -> Result<(), IndexError> {
     Ok(())
 }
 
+/// BETA-59：老库 `documents_fts` 只有 `title/author/body` 三列时，加 `entity` 末列
+/// （PII 类型概念词专列，与展示正文隔离）。幂等——已含 entity 列则 no-op。
+///
+/// **为何不能照搬 [`migrate_music_fts`] 从主表重建**：`music_fts` 的所有列在 `music`
+/// 主表都有备份、可 `INSERT ... SELECT FROM music` 重灌；而 `documents_fts.body` 是
+/// **正文唯一存处**（主表不存），drop 即丢正文、搜索全灭。故这里先把旧三列内容拷进
+/// 新四列表（`entity` 灌空串）、再 drop 旧表 rename——**body 逐行保留、零丢失**。
+///
+/// **迁移策略取舍（不 bump [`INDEXER_SCHEMA_VERSION`]）**：本迁移就地保住 body、升级
+/// 用户无运行时崩（4 列 INSERT 只在迁移后才跑）、老文档照常可搜，仅 `entity` 列暂空、
+/// 待下次内容变更增量重抽回填 PII 概念词——与 [`migrate_documents_content_hash`] /
+/// [`migrate_music_fts`] 同属"透明加列"、均无 schema bump。反之 bump 版本会（T10
+/// preflight 版本门生效后）逼所有 daemon 用户 `--allow-rebuild-schema` 全量重建，
+/// 为一个出处片段观感优化付全库重抽代价、不划算。
+fn migrate_documents_fts_entity(conn: &Connection) -> Result<(), IndexError> {
+    if documents_fts_has_entity(conn)? {
+        return Ok(());
+    }
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE documents_fts_new USING fts5(title, author, body, entity, tokenize='trigram');
+         INSERT INTO documents_fts_new(rowid, title, author, body, entity)
+           SELECT rowid, title, author, body, '' FROM documents_fts;
+         DROP TABLE documents_fts;
+         ALTER TABLE documents_fts_new RENAME TO documents_fts;",
+    )?;
+    Ok(())
+}
+
+fn documents_fts_has_entity(conn: &Connection) -> Result<bool, IndexError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(documents_fts)")?;
+    // table_info 第 1 列（index 1）是列名。
+    let names = stmt.query_map([], |r| r.get::<_, String>(1))?;
+    for name in names {
+        if name? == "entity" {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn row_to_hit(r: &rusqlite::Row<'_>, with_snippet: bool) -> rusqlite::Result<DocumentHit> {
     let entry = DocumentEntry {
         path: r.get(0)?,
@@ -1107,6 +1152,21 @@ mod tests {
             modified_time: 1000,
             content_hash: None,
         }
+    }
+
+    /// 合成一枚校验位合法的身份证号（地区码 + 生日 + 顺序码 17 位 → 按 GB 11643 算末位）。
+    fn synth_id_card(prefix17: &str) -> String {
+        let weights = [7_u32, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
+        let check_codes = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2'];
+        let sum: u32 = prefix17
+            .bytes()
+            .zip(weights)
+            .map(|(b, weight)| u32::from(b - b'0') * weight)
+            .sum();
+        format!(
+            "{prefix17}{}",
+            check_codes[usize::try_from(sum % 11).unwrap()]
+        )
     }
 
     #[test]
@@ -1188,6 +1248,109 @@ mod tests {
             .unwrap();
         assert_eq!(hits.len(), 1, "概念词应经 PII 类型关键词命中文档");
         assert_eq!(hits[0].entry.file_name, "准考证.png");
+    }
+
+    /// BETA-59：PII 类型概念词写进独立 `entity` 列而非 body——「身份证」仍经 `MATCH`
+    /// 跨列命中，但 `snippet()`（固定 body 列）绝不回显注入的类型关键词；`preview` 取回的
+    /// 正文也不含关键词尾巴。构造正文**无任何字面证件标签**、只有合成校验位身份证号。
+    #[test]
+    fn pii_keywords_land_in_entity_not_body_snippet_stays_clean() {
+        let idx = DocumentIndex::open_in_memory().unwrap();
+        let card = synth_id_card("11010519900101123");
+        // 正文只有裸号码、无「身份证」「证件」等字面标签。
+        let body = format!("报名表 姓名王五 编号 {card} 备注无。");
+        idx.upsert_document(&doc("/d/报名表.png", "png", "x"), &body)
+            .unwrap();
+
+        // 「身份证」经 entity 列 MATCH 命中。
+        let hits = idx
+            .query(&DocumentQuery {
+                text: Some("身份证".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1, "概念词应经 entity 列命中");
+        // 命中片段固定取自 body 列——正文无字面标签、故片段绝不含注入的类型关键词。
+        let snip = hits[0].snippet.as_deref().unwrap_or("");
+        for kw in ["身份证", "身份证号", "证件号", "identity_card"] {
+            assert!(
+                !snip.contains(kw),
+                "snippet 不应回显 entity 注入词 {kw:?}，实际片段：{snip:?}"
+            );
+        }
+
+        // preview 取回的完整正文同样只有原始 body、无关键词尾巴。
+        let preview = idx
+            .preview_for_path("/d/报名表.png", Some("\"身份证\""))
+            .unwrap()
+            .unwrap();
+        assert_eq!(preview.body, body, "正文列应原样保存、不夹带 entity 关键词");
+        for kw in ["身份证号", "证件号", "identity_card"] {
+            assert!(
+                !preview.body.contains(kw),
+                "preview 正文不应含注入词 {kw:?}"
+            );
+        }
+    }
+
+    /// BETA-59：老库 `documents_fts`（3 列 title/author/body）打开时自动迁移到 4 列
+    /// （加 entity）——**body 逐行保留**（老正文仍可搜）、迁移后新写入的 PII 概念词经
+    /// entity 列可搜且 snippet 干净。防"drop 丢正文"与"列数不匹配运行时崩"双回归。
+    #[test]
+    fn old_three_col_documents_fts_migrates_to_entity_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy_fts.db");
+        // 手工建"老库"：documents_fts 故意只有 3 列 + 一条老正文。
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE documents (
+                   id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, file_name TEXT NOT NULL,
+                   title TEXT, author TEXT, doc_type TEXT NOT NULL, page_count INTEGER,
+                   modified_time INTEGER NOT NULL, indexed_time INTEGER NOT NULL
+                 );
+                 CREATE VIRTUAL TABLE documents_fts USING fts5(title, author, body, tokenize='trigram');
+                 INSERT INTO documents(path, file_name, doc_type, modified_time, indexed_time)
+                   VALUES ('/old/a.txt', 'a.txt', 'txt', 1, 1);
+                 INSERT INTO documents_fts(rowid, title, author, body)
+                   SELECT id, title, author, '本季度营收分析老正文关键词' FROM documents WHERE path='/old/a.txt';",
+            )
+            .unwrap();
+        } // drop 落盘
+
+        // 打开 → 自动加 entity 列、老正文 body 保留。
+        let idx = DocumentIndex::open(&path).unwrap();
+        assert!(
+            documents_fts_has_entity(&idx.conn).unwrap(),
+            "迁移后应有 entity 列"
+        );
+        let old = idx
+            .query(&DocumentQuery {
+                text: Some("营收分析老正文".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(old.len(), 1, "老正文 body 迁移后仍可搜（未丢失）");
+
+        // 迁移后新写入的 PII 文档：概念词经 entity 命中、snippet 不回显。
+        let card = synth_id_card("11010519900101123");
+        idx.upsert_document(
+            &doc("/new/报名.png", "png", "x"),
+            &format!("编号 {card} 无字面标签。"),
+        )
+        .unwrap();
+        let hits = idx
+            .query(&DocumentQuery {
+                text: Some("身份证".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1, "迁移后新文档的 PII 概念词应经 entity 命中");
+        let snip = hits[0].snippet.as_deref().unwrap_or("");
+        assert!(
+            !snip.contains("identity_card"),
+            "snippet 不应回显 entity 注入词"
+        );
     }
 
     #[test]

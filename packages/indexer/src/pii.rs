@@ -17,10 +17,6 @@ pub(crate) struct PiiTypes {
 }
 
 impl PiiTypes {
-    fn is_empty(self) -> bool {
-        !self.identity_card && !self.phone
-    }
-
     fn keywords(self) -> Vec<&'static str> {
         let mut out = Vec::new();
         if self.identity_card {
@@ -41,18 +37,15 @@ pub(crate) fn detect_pii_types(text: &str) -> PiiTypes {
     }
 }
 
-/// 给 FTS body 追加 PII 类型关键词。隐私约束：只追加类型词，不复制号码明文。
-pub(crate) fn append_pii_keywords_for_fts(body: &str) -> String {
-    let pii = detect_pii_types(body);
-    if pii.is_empty() {
-        return body.to_string();
-    }
-    let keywords = pii.keywords().join(" ");
-    if body.is_empty() {
-        keywords
-    } else {
-        format!("{body}\n{keywords}")
-    }
+/// 从正文识别 PII 类型、返回该文档的 FTS `entity` 列内容（仅类型概念词，空格分隔）。
+/// 无受控 PII → 空串。隐私约束：只输出类型词，绝不复制号码明文。
+///
+/// BETA-59 重构（独立 `entity` 列）：关键词写进 `documents_fts.entity`（末列）而非并入
+/// `body`。`query` 用裸 `documents_fts MATCH` 自动跨所有列——entity 里的「身份证」等类型词
+/// 照样可被概念词命中；而 `snippet()` 固定打 body 列（index 2）、永不回显 entity，
+/// 彻底隔离"可搜的类型标签"与"展示的正文"（修 body 内联时出处片段回显关键词尾巴的观感）。
+pub(crate) fn pii_entity_keywords(body: &str) -> String {
+    detect_pii_types(body).keywords().join(" ")
 }
 
 fn contains_valid_identity_card(text: &str) -> bool {
@@ -132,7 +125,6 @@ fn has_ascii_alnum_after(text: &str, index: usize) -> bool {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
-
     use super::*;
 
     fn synth_identity_card(prefix17: &str) -> String {
@@ -169,15 +161,21 @@ mod tests {
     }
 
     #[test]
-    fn append_keywords_never_copies_detected_numbers() {
+    fn entity_keywords_never_copy_detected_numbers() {
         let card = synth_identity_card("11010519900101123");
         let phone = "13912345678";
         let body = format!("报名信息 {card} 联系 {phone}");
-        let injected = append_pii_keywords_for_fts(&body);
-        let suffix = injected.strip_prefix(&body).unwrap_or("");
-        assert!(suffix.contains("身份证"));
-        assert!(suffix.contains("手机号"));
-        assert!(!suffix.contains(&card));
-        assert!(!suffix.contains(phone));
+        let entity = pii_entity_keywords(&body);
+        assert!(entity.contains("身份证"));
+        assert!(entity.contains("手机号"));
+        // 只输出类型概念词、绝不回带号码明文，也不夹带正文。
+        assert!(!entity.contains(&card));
+        assert!(!entity.contains(phone));
+        assert!(!entity.contains("报名信息"));
+    }
+
+    #[test]
+    fn entity_keywords_empty_when_no_pii() {
+        assert_eq!(pii_entity_keywords("普通正文，无任何证件或手机号。"), "");
     }
 }
