@@ -187,8 +187,9 @@ impl ServerHandler for LocifindMcpHandler {
             .with_instructions(
                 "LociFind 团队归档检索 MCP server，按归档集合（collection：案件 / 离职员工 / \
                  审计项目）组织文档、文件、媒体索引；每个 token 只能检索其被授权的集合。\
-                 用 `search` 工具按自然语言搜索（支持中文、英文、跨语言模糊查询，\
-                 例如「去年汇报过的友商竞争分析」；可选 `collections` 参数限定集合），\
+                 用 `search` 工具按自然语言搜索（支持 OCR 正文、中文、英文、跨语言模糊查询，\
+                 也支持按「身份证/手机号」等已识别 PII 类型概念词检索；例如\
+                 「去年汇报过的友商竞争分析」；可选 `collections` 参数限定集合），\
                  返回命中文件的 path / name / collection / size / mtime / score 以及出处\
                  定位（snippet 命中片段；扫描件另带 pages 命中页号）。\
                  如需阅读命中文档内容，用 `read_document` 工具（传入命中的 path 与 \

@@ -21,6 +21,7 @@ mod extract;
 mod model;
 mod ocr;
 mod pdf_rasterizer;
+mod pii;
 mod placeholder;
 pub mod progress;
 mod scan;

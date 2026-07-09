@@ -12,7 +12,10 @@ interface McpServiceStatus {
   semantic: boolean | null;
 }
 
-/** 生成 Claude Code / Codex 的 `mcpServers` 接入片段（照 apps/daemon/README §4）。 */
+/** 接入客户端类型（决定「接入配置」区块给出的形态）。 */
+type McpClient = "claude" | "codex" | "curl";
+
+/** 生成 Claude Code 的 `mcpServers` 接入片段（照 apps/daemon/README §4）。 */
 function configSnippet(url: string, token: string): string {
   return JSON.stringify(
     {
@@ -29,6 +32,84 @@ function configSnippet(url: string, token: string): string {
   );
 }
 
+/** Codex：把当前令牌写进 `LOCIFIND_MCP_TOKEN` 环境变量（MSIX 桌面版须注销重登才生效）。 */
+function codexSetxCmd(token: string): string {
+  return `setx LOCIFIND_MCP_TOKEN "${token}"`;
+}
+
+/** Codex：注册本机 MCP server（令牌从环境变量读，不明文落配置文件）。 */
+function codexAddCmd(url: string): string {
+  return `codex mcp add locifind-local --url ${url} --bearer-token-env-var LOCIFIND_MCP_TOKEN`;
+}
+
+/** 通用 curl 探活：rmcp 要求 Accept 同时声明 `application/json` 与 `text/event-stream`，缺一即报错。 */
+function curlSnippet(url: string, token: string): string {
+  return [
+    `curl -X POST ${url} \\`,
+    `  -H "Authorization: Bearer ${token}" \\`,
+    `  -H "Content-Type: application/json" \\`,
+    `  -H "Accept: application/json, text/event-stream" \\`,
+    `  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`,
+  ].join("\n");
+}
+
+/**
+ * 可复制的代码块 + 复制按钮（复用面板既有的深色代码框配色）。
+ * `multiline` 为真时用可横向滚动的 `<pre>`（命令 / 片段），否则用单行 `<code>`（令牌）。
+ */
+function CopyBlock(props: {
+  code: string;
+  copied: boolean;
+  onCopy: () => void;
+  multiline?: boolean;
+}) {
+  const { code, copied, onCopy, multiline = false } = props;
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: "8px",
+        alignItems: multiline ? "flex-start" : "center",
+      }}
+    >
+      {multiline ? (
+        <pre
+          style={{
+            flex: 1,
+            margin: 0,
+            padding: "8px 10px",
+            borderRadius: "5px",
+            backgroundColor: "#1e1e1e",
+            color: "#e6e6e6",
+            fontSize: "12px",
+            overflowX: "auto",
+            whiteSpace: "pre",
+          }}
+        >
+          {code}
+        </pre>
+      ) : (
+        <code
+          style={{
+            flex: 1,
+            padding: "6px 10px",
+            borderRadius: "5px",
+            backgroundColor: "#1e1e1e",
+            color: "#e6e6e6",
+            fontSize: "12.5px",
+            wordBreak: "break-all",
+          }}
+        >
+          {code}
+        </code>
+      )}
+      <button type="button" className="prefs-btn small" onClick={onCopy}>
+        {copied ? "已复制" : "复制"}
+      </button>
+    </div>
+  );
+}
+
 /**
  * BETA-53：「本机 MCP 服务」面板（跨平台）。
  *
@@ -41,7 +122,10 @@ export function McpPane() {
   const [status, setStatus] = useState<McpServiceStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState<"token" | "config" | null>(null);
+  // 记录「哪个代码块刚复制了」——每个可复制块用一个稳定 key 区分。
+  const [copied, setCopied] = useState<string | null>(null);
+  // 接入配置区块当前选中的客户端。
+  const [client, setClient] = useState<McpClient>("claude");
 
   const refresh = useCallback(async () => {
     try {
@@ -89,7 +173,7 @@ export function McpPane() {
     }
   };
 
-  const copy = async (text: string, which: "token" | "config") => {
+  const copy = async (text: string, which: string) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(which);
@@ -193,39 +277,114 @@ export function McpPane() {
           </div>
 
           <div className="prefs-field">
-            <label className="prefs-label">
-              Claude Code / Codex 接入配置
-            </label>
-            <p className="prefs-hint">
-              把下面这段加进客户端的 MCP 配置（Claude Code：
-              <code>~/.claude/settings.json</code>），即可用 <code>search</code> /
-              <code>read_document</code> 工具检索本机文件：
-            </p>
-            <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
-              <pre
-                style={{
-                  flex: 1,
-                  margin: 0,
-                  padding: "8px 10px",
-                  borderRadius: "5px",
-                  backgroundColor: "#1e1e1e",
-                  color: "#e6e6e6",
-                  fontSize: "12px",
-                  overflowX: "auto",
-                }}
-              >
-                {configSnippet(status?.url ?? "", token)}
-              </pre>
-              <button
-                type="button"
-                className="prefs-btn small"
-                onClick={() =>
-                  void copy(configSnippet(status?.url ?? "", token), "config")
-                }
-              >
-                {copied === "config" ? "已复制" : "复制"}
-              </button>
+            <label className="prefs-label">接入配置</label>
+            {/* 客户端切换：不同客户端吃的接入方式不一样（Claude 吃 JSON、Codex 吃 mcp add 命令）。 */}
+            <div style={{ display: "flex", gap: "6px", marginBottom: "4px" }}>
+              {(
+                [
+                  ["claude", "Claude Code"],
+                  ["codex", "Codex"],
+                  ["curl", "通用 / curl"],
+                ] as [McpClient, string][]
+              ).map(([id, name]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={
+                    client === id ? "prefs-btn small primary" : "prefs-btn small"
+                  }
+                  onClick={() => setClient(id)}
+                >
+                  {name}
+                </button>
+              ))}
             </div>
+
+            {client === "claude" && (
+              <>
+                <p className="prefs-hint">
+                  把下面这段加进 Claude Code 的 MCP 配置（
+                  <code>~/.claude/settings.json</code>），即可用{" "}
+                  <code>search</code> / <code>read_document</code>{" "}
+                  工具检索本机文件：
+                </p>
+                <CopyBlock
+                  code={configSnippet(status?.url ?? "", token)}
+                  copied={copied === "claude-config"}
+                  onCopy={() =>
+                    void copy(
+                      configSnippet(status?.url ?? "", token),
+                      "claude-config",
+                    )
+                  }
+                  multiline
+                />
+              </>
+            )}
+
+            {client === "codex" && (
+              <>
+                <p className="prefs-hint">
+                  Codex 不吃 <code>mcpServers</code> JSON，只认{" "}
+                  <code>codex mcp add</code> 命令。依次执行下面两条（第一条写令牌到
+                  环境变量，第二条注册本机 server）：
+                </p>
+                <p className="prefs-hint" style={{ marginTop: "4px" }}>
+                  1. 写入令牌环境变量：
+                </p>
+                <CopyBlock
+                  code={codexSetxCmd(token)}
+                  copied={copied === "codex-setx"}
+                  onCopy={() => void copy(codexSetxCmd(token), "codex-setx")}
+                  multiline
+                />
+                <p className="prefs-hint" style={{ marginTop: "6px" }}>
+                  2. 注册 MCP server：
+                </p>
+                <CopyBlock
+                  code={codexAddCmd(status?.url ?? "")}
+                  copied={copied === "codex-add"}
+                  onCopy={() =>
+                    void copy(codexAddCmd(status?.url ?? ""), "codex-add")
+                  }
+                  multiline
+                />
+                <p
+                  className="prefs-hint"
+                  style={{ color: "#8a5a00", marginTop: "8px" }}
+                >
+                  ⚠ Codex 桌面版是 MSIX 应用：<code>setx</code> 设置环境变量后，需
+                  <strong>注销并重新登录 Windows</strong>（或重启机器）才会生效
+                  ——重启 Codex app 或 explorer 都不够。否则会连上但一直 401。
+                </p>
+              </>
+            )}
+
+            {client === "curl" && (
+              <>
+                <p className="prefs-hint">
+                  用 curl 手动探活 / 调试 <code>/mcp</code>（返回工具清单即通）：
+                </p>
+                <CopyBlock
+                  code={curlSnippet(status?.url ?? "", token)}
+                  copied={copied === "curl"}
+                  onCopy={() =>
+                    void copy(curlSnippet(status?.url ?? "", token), "curl")
+                  }
+                  multiline
+                />
+                <p className="prefs-hint" style={{ marginTop: "8px" }}>
+                  手动测 <code>/mcp</code> 时 rmcp 要求 <code>Accept</code> 头同时
+                  声明 <code>application/json</code> 和{" "}
+                  <code>text/event-stream</code>，缺一即报错。
+                </p>
+                <p className="prefs-hint" style={{ color: "#8a5a00" }}>
+                  ⚠ Windows 请在 Git Bash 或真 <code>curl.exe</code> 中运行：
+                  PowerShell 的 <code>curl</code> 是 <code>Invoke-WebRequest</code>{" "}
+                  别名，既不认这种多行反斜杠续行，对本响应体也可能抛空引用错误。
+                </p>
+              </>
+            )}
           </div>
         </>
       )}

@@ -189,6 +189,11 @@ let hits = idx.query(&DocumentQuery {
 `extraction_failures()` / `extraction_failure_count()`。与 `document_failed_pages`
 （扫描 PDF **页级**失败）互补。音乐库暂不留痕（`IncrementalStore` 默认 no-op）。
 
+**PII 类型概念词召回**：写入 `documents_fts.body` 前会对正文做轻量 PII 类型识别，仅在命中
+中国大陆身份证号（18 位且 GB 11643 校验位正确）或手机号（`1[3-9]\d{9}`）时追加
+“身份证 / 手机号”等**类型关键词**，用于「查找包含身份证信息的文件」这类概念查询；不会把识别到的
+号码复制到任何新字段。存量索引需清空或重建后才会具备该召回能力。
+
 ### known limitation
 
 - **旧版二进制 doc / ppt（pre-2007）不支持**：纯 Rust 难，defer（旧版 xls 经 calamine 覆盖）。

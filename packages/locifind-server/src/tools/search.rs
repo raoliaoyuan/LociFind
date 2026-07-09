@@ -132,8 +132,12 @@ impl Tool for SearchTool {
     }
 
     fn description(&self) -> &'static str {
-        "Search the indexed archive collections by natural language query. \
-         Returns hit file paths + metadata + owning collection."
+        "Search indexed archive collections by natural language query, including file metadata, \
+         Office/PDF/text/email body text, OCR text from images or scanned pages, and hybrid \
+         semantic recall across Chinese and English. Supports concept queries for detected PII \
+         types such as 身份证/身份证号/证件号/identity_card and 手机号/电话/phone; only type \
+         keywords are indexed, not newly copied raw numbers. Returns hit file paths + metadata + \
+         owning collection."
     }
 
     fn input_schema(&self) -> Value {

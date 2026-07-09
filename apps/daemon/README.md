@@ -231,7 +231,9 @@ locifindd --config /etc/locifindd.toml --data-dir /var/lib/locifindd \
 
 ## 4. Claude Code / Codex 接入
 
-在客户端机器的 `~/.claude/settings.json`（或 Codex / Cline 的 MCP server 配置位置）：
+### 4.1 Claude Code（`mcpServers` JSON）
+
+在客户端机器的 `~/.claude/settings.json`（Cline 等吃同款 JSON 的客户端配置位置同理）：
 
 ```json
 {
@@ -245,6 +247,29 @@ locifindd --config /etc/locifindd.toml --data-dir /var/lib/locifindd \
     }
   }
 }
+```
+
+### 4.2 Codex（`codex mcp add` 命令）
+
+Codex **不吃上面的 `mcpServers` JSON**，只认 `codex mcp add` 命令（写进它自己的 TOML 配置）。令牌走环境变量、不明文落配置：
+
+```bash
+setx LOCIFIND_MCP_TOKEN "<token>"
+codex mcp add locifind-local --url http://192.168.1.50:8765/mcp --bearer-token-env-var LOCIFIND_MCP_TOKEN
+```
+
+> ⚠ **Codex 桌面版是 MSIX 应用**：`setx` 设置环境变量后，需**注销并重新登录 Windows**（或重启机器）才会生效——重启 Codex app 或 explorer 都不够。否则会连上但一直返回 `401`。
+
+### 4.3 通用 / curl 探活
+
+手动测 `/mcp` 时 rmcp 要求 `Accept` 头**同时**声明 `application/json` 和 `text/event-stream`，缺一即报错：
+
+```bash
+curl -X POST http://192.168.1.50:8765/mcp \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 客户端启动后会自动调 `tools/list` 发现三个工具：

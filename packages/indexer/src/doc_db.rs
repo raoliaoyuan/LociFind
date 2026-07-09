@@ -16,6 +16,7 @@ use crate::model::{
     DocumentEntry, DocumentHit, DocumentPreview, DocumentQuery, ExtractedDoc, ExtractionFailure,
     PageFailure, PagePassage,
 };
+use crate::pii::append_pii_keywords_for_fts;
 use crate::scan::IncrementalStore;
 use crate::version::ensure_schema_version;
 use crate::IndexError;
@@ -374,11 +375,17 @@ impl DocumentIndex {
             tx.last_insert_rowid()
         };
 
-        // FTS 刷 body（同 upsert_document）。
+        // FTS 刷 body（同 upsert_document）。PII 只注入类型关键词，绝不复制号码明文；
+        // 存量索引需重建后才具备这些概念词召回。
+        // 已知权衡：关键词并入 body（正文只存 FTS），当查询**仅**命中注入词（文档正文
+        // 无「身份证」等字面标签、只有裸号码）时，`snippet()` 可能回显这截关键词。多数
+        // 证件/准考证扫描件正文自带「身份证号」标签、不触发；后续可提为独立 `entity` FTS 列
+        // 彻底隔离（MATCH 自动跨列可搜、snippet 仍固定 body 列），代价是 documents_fts 加列迁移。
+        let fts_body = append_pii_keywords_for_fts(body);
         tx.execute("DELETE FROM documents_fts WHERE rowid = ?1", [id])?;
         tx.execute(
             "INSERT INTO documents_fts(rowid, title, author, body) VALUES (?1,?2,?3,?4)",
-            params![id, e.title, e.author, body],
+            params![id, e.title, e.author, fts_body],
         )?;
 
         // 幂等：先清后写。空 vec 时 INSERT 循环空转、DELETE 空表安全。
@@ -1144,6 +1151,38 @@ mod tests {
                 .unwrap();
             assert_eq!(hits.len(), 1, "查询 {q:?} 应命中校正后的 OCR 正文");
         }
+    }
+
+    #[test]
+    fn pii_identity_card_keyword_injection_hits_concept_query() {
+        let idx = DocumentIndex::open_in_memory().unwrap();
+        // 合成身份证号：地区码 + 生日 + 顺序码，末位按 GB 11643 校验位计算。
+        let prefix17 = "11010519900101123";
+        let weights = [7_u32, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
+        let check_codes = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2'];
+        let sum: u32 = prefix17
+            .bytes()
+            .zip(weights)
+            .map(|(b, weight)| u32::from(b - b'0') * weight)
+            .sum();
+        let card = format!(
+            "{prefix17}{}",
+            check_codes[usize::try_from(sum % 11).unwrap()]
+        );
+        idx.upsert_document(
+            &doc("/d/准考证.png", "png", "x"),
+            &format!("报名信息 {card}，正文不含证件类型词。"),
+        )
+        .unwrap();
+
+        let hits = idx
+            .query(&DocumentQuery {
+                text: Some("身份证".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1, "概念词应经 PII 类型关键词命中文档");
+        assert_eq!(hits[0].entry.file_name, "准考证.png");
     }
 
     #[test]

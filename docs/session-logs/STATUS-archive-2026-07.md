@@ -5,6 +5,14 @@
 > 后续会话的详录写入 session-details-YYYY-MM.md、溢出摘要滚动追加到本文件。
 
 ---
+### 2026-07-08 — Claude Code (Opus 4.8) — 修复本机 MCP 服务 token 持久化分叉
+
+**承接**：2026-07-08 Codex 接 MCP 排查（memory `mcp-token-ux-dual-settings-bug`）暴露矛盾态——运行态持 token（`/health` 200、旧 token 401）但磁盘 settings.json 显示 token=null/enabled=false。
+**根因**：**非**双数据目录（后端与 UI 同写 `app_config_dir/settings.json`）；实为**双写者覆盖**——MCP token/enabled 后端带外写盘，偏好表单 `update_settings` 全量覆写时用挂载期旧快照把其冲成 null，运行中 axum server 仍持内存旧 token → 401 静默失效。
+**产出**：[settings.rs](../../apps/desktop/src-tauri/src/settings.rs) `update_settings` 改为写盘前读磁盘、合并回后端带外管理的 `mcp_service_enabled`/`mcp_service_token`（`merge_backend_managed_mcp_fields` + 可测 `update_settings_at` 内核），磁盘成 MCP 两字段唯一信源；`settings.rs` +2 测试（clobber 回归 / 首存无文件）、[mcp_service.rs](../../apps/desktop/src-tauri/src/mcp_service.rs) +1 测试（status↔磁盘 token 一致守卫）；doc_markdown·field_reassign 已按 CI pedantic 核对。
+**未尽事宜**：本机无 MSVC 工具链无法本地 `cargo test`/clippy，编译验证靠 CI；未 bump 版本，随下个发版携带。
+
+---
 ### 2026-07-08 — Claude Code (Opus 4.8) — MCP 令牌重置 UX 小修（发版后）
 
 **承接**：任务据「Codex 接 MCP 排查」印象报「面板只弹一次 token + 缺重置按钮」→ 复现发现二者早在 e1f3048（2026-07-07）已具备（token 随 3s 轮询常驻、重置按钮在列），任务描述来自旧装机版。用户拍板：把唯一真实缺口——`reset_token` 停服务后需手动重启——**改为自动重启**。
