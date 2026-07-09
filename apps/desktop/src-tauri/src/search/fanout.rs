@@ -5,11 +5,13 @@ use std::time::Instant;
 
 use locifind_harness::context::{ContextMemory, RefineMergeError};
 use locifind_harness::{
-    run_fanout_merge_rrf, run_fanout_merge_with_fallback, IntentRouter, MergedResult,
-    SearchableTool,
+    fuse_fanout_merge, fuse_fanout_rrf, run_fanout_merge_with_fallback, FanoutOutcome,
+    IntentRouter, MergedResult, SearchableTool,
 };
 use locifind_intent_parser::fallback::IntentSource;
-use locifind_search_backend::{CancellationToken, SearchIntent};
+use locifind_search_backend::{
+    BackendKind, CancellationToken, ExpandedSearchIntent, SearchIntent, SearchResult,
+};
 use tauri::ipc::Channel;
 
 use super::{
@@ -22,6 +24,125 @@ fn fanout_has_semantic(backends: &[std::sync::Arc<dyn SearchableTool>]) -> bool 
     backends.iter().any(|t| {
         t.capability().backend_kind == Some(locifind_search_backend::BackendKind::SemanticIndex)
     })
+}
+
+/// Track A 并发收集：单后端查询产物（回收时**保持后端在 `backends` 中的原序**）。
+struct BackendCollected {
+    /// 该后端 `capability().backend_kind`（用于拆 fts/vec 臂 + 填 `sources_queried`）。
+    backend_kind: Option<BackendKind>,
+    /// pre-stream 是否成功拿到流；**仅成功者计入 `sources_queried`**（与串行版逐字节对齐）。
+    queried: bool,
+    /// 收集到的结果（保持后端到达顺序＝rank）。
+    results: Vec<SearchResult>,
+    /// 该后端错误 `(tool_id, message)`；至多一条（pre-stream Err 或首个流内 Err）。
+    errors: Vec<(String, String)>,
+}
+
+/// Track A 搜索并发化核心：把每个后端的 `search_expanded` 查询丢到 tokio 阻塞线程池
+/// （`spawn_blocking`），线程内用 **runtime 无关**的 `futures_executor::block_on` 驱动其
+/// stream 到收齐，再按后端原序 `.await` 等齐——总耗时≈最慢的一个后端，而非各后端求和。
+///
+/// 为何在此层（desktop）编排：harness 是 runtime 无关的、后端多是「同步阻塞体塞进 async
+/// 块、无 `spawn_blocking`」，单纯 `join_all` 在单线程 executor 上不会真并行阻塞体。真并行
+/// 必须把每个后端查询丢到阻塞线程上，而 Tauri 跑在多线程 tokio 上，故并发编排放这里。
+///
+/// 并发安全：语义 embed 内部走 Mutex 串行化、SQLite 每后端独立连接、子进程互相独立，
+/// 故并发查询安全；各后端 backend 内部为同步阻塞体（无 tokio reactor 需求），单线程
+/// executor 足以驱动、且不与 tauri 全局 tokio runtime 耦合。
+///
+/// 取消/错误语义与串行 [`run_fanout_merge`](locifind_harness::run_fanout_merge) 对齐：
+/// pre-stream Err 记 `errors`、不计 `sources_queried`；流内首个 Err 记 `errors` 后停该后端；
+/// 每个 `spawn_blocking` 闭包须 `Send + 'static`（`Arc`/`expanded`/`cancel` clone 后 move 进闭包）。
+async fn concurrent_collect(
+    backends: &[Arc<dyn SearchableTool>],
+    expanded: &ExpandedSearchIntent,
+    cancel: &CancellationToken,
+) -> Vec<BackendCollected> {
+    // 取消已触发 → 不发起任何查询（对齐串行版 for-loop 首行 break）。
+    if cancel.is_cancelled() {
+        return Vec::new();
+    }
+
+    let mut handles = Vec::with_capacity(backends.len());
+    for tool in backends {
+        let tool = Arc::clone(tool);
+        let expanded = expanded.clone();
+        let cancel = cancel.clone();
+        let handle = tauri::async_runtime::spawn_blocking(move || {
+            let tool_id = tool.id().to_owned();
+            let backend_kind = tool.capability().backend_kind;
+            let mut results: Vec<SearchResult> = Vec::new();
+            let mut errors: Vec<(String, String)> = Vec::new();
+            let mut queried = false;
+            futures_executor::block_on(async {
+                match tool.search_expanded(&expanded, cancel.clone()).await {
+                    Err(err) => errors.push((tool_id.clone(), err.to_string())),
+                    Ok(mut stream) => {
+                        queried = true;
+                        use futures_util::StreamExt;
+                        while let Some(item) = stream.next().await {
+                            if cancel.is_cancelled() {
+                                break;
+                            }
+                            match item {
+                                Ok(result) => results.push(result),
+                                Err(err) => {
+                                    errors.push((tool_id.clone(), err.to_string()));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            BackendCollected {
+                backend_kind,
+                queried,
+                results,
+                errors,
+            }
+        });
+        handles.push(handle);
+    }
+
+    // 按后端原序回收（排序 tie-break 依赖它）。spawn_blocking join 失败（线程 panic）
+    // → 记空产物占位跳过，不污染 sources_queried/errors、不中断其它后端。
+    let mut collected = Vec::with_capacity(handles.len());
+    for handle in handles {
+        match handle.await {
+            Ok(bc) => collected.push(bc),
+            Err(_) => collected.push(BackendCollected {
+                backend_kind: None,
+                queried: false,
+                results: Vec::new(),
+                errors: Vec::new(),
+            }),
+        }
+    }
+    collected
+}
+
+/// Track A：把 [`concurrent_collect`] 收回的 per-backend 产物按后端原序归约为
+/// `(sources_queried, errors)` 两条累加列表。`split` 回调对每个后端的 `results`
+/// 做归口（RRF 路径拆 fts/vec 臂；merge 路径直接 extend 到单列表）——保证与串行版
+/// 逐字节等价：`sources_queried` 只收 pre-stream 成功者、`errors` 按后端序拼接。
+fn reduce_collected(
+    collected: Vec<BackendCollected>,
+    sources_queried: &mut Vec<BackendKind>,
+    errors: &mut Vec<(String, String)>,
+    mut split: impl FnMut(Option<BackendKind>, Vec<SearchResult>),
+) {
+    for bc in collected {
+        if bc.queried {
+            if let Some(kind) = bc.backend_kind {
+                if !sources_queried.contains(&kind) {
+                    sources_queried.push(kind);
+                }
+            }
+        }
+        errors.extend(bc.errors);
+        split(bc.backend_kind, bc.results);
+    }
 }
 
 /// BETA-04 fan-out 多源搜索分支：同时查 `backends`（系统搜索 + 本地索引），结果经
@@ -68,57 +189,91 @@ pub(crate) async fn run_fanout_search(
     // 不接文件名兜底（语义/FTS 内容后端覆盖语义召回，无需 Everything 文件名补召回）。
     // 不含语义臂 → 沿用原 fan-out + 文件名兜底路径（字节级零行为变化）。
     let has_semantic = fanout_has_semantic(&backends);
+
+    // Track A 搜索并发化：先并发查询所有后端（总耗时≈最慢的一个而非求和），再在 harness
+    // 抽出的纯 fuse 函数上做与串行版逐字节等价的融合。融合语义（RRF 路由 / merge 去重 /
+    // 文件名兜底触发条件）完全不变，仅查询由串行改并发。
+    let collected = concurrent_collect(&backends, &expanded, &cancel).await;
+    let mut sources_queried: Vec<BackendKind> = Vec::new();
+    let mut errors: Vec<(String, String)> = Vec::new();
+
     // 收齐合并结果（fan-out 本就先收齐各源再合并，无流式损失）→ Ranker 排序 → 按序发出。
-    let mut merged: Vec<MergedResult> = Vec::new();
+    let merged: Vec<MergedResult>;
     let outcome = if has_semantic {
-        let merged_ref = &mut merged;
-        let mut on_result = |m: MergedResult| merged_ref.push(m);
+        // 按 backend_kind 拆 fts 臂（非 SemanticIndex）/ vec 臂（SemanticIndex），喂纯 fuse_fanout_rrf。
+        let mut fts_list: Vec<SearchResult> = Vec::new();
+        let mut vec_list: Vec<SearchResult> = Vec::new();
+        reduce_collected(
+            collected,
+            &mut sources_queried,
+            &mut errors,
+            |kind, results| {
+                if matches!(kind, Some(BackendKind::SemanticIndex)) {
+                    vec_list.extend(results);
+                } else {
+                    fts_list.extend(results);
+                }
+            },
+        );
         let semantic_weight = deps.semantic_weight();
-        run_fanout_merge_rrf(
-            &backends,
-            &expanded,
-            cancel,
-            &mut on_result,
-            semantic_weight,
-            raw_query,
-        )
-        .await
+        let (fused, verdict) = fuse_fanout_rrf(fts_list, vec_list, semantic_weight, raw_query);
+        merged = fused;
+        FanoutOutcome {
+            total: merged.len(),
+            sources_queried,
+            errors,
+            route_verdict: Some(verdict),
+        }
     } else {
-        // 文件名兜底候选（Everything）：内容 fan-out（仅 content-capable）零结果时按文件名补召回，
-        // 闭合「文件在系统索引/本地索引未覆盖的位置、但文件名含关键词」的盲区。
-        // macOS 无纯文件名后端 → 空 → 兜底永不触发（零行为变化）。
-        let filename_fallback =
-            IntentRouter::new(deps.registry()).route_filename_fallback(&expanded);
-        let merged_ref = &mut merged;
-        let on_event_ref = &on_event;
-        let tracer_ref = &deps.tracer;
-        let from_id = backends[0].id().to_owned();
-        let to_id = filename_fallback.first().map(|t| t.id().to_owned());
-        let mut on_result = |m: MergedResult| merged_ref.push(m);
-        let mut on_fallback = move || {
-            // 内容源全空 → 切到 Everything 文件名兜底：发 BackendSwitched 供 UI 提示 + trace 记一条。
-            if let Some(to) = to_id.as_deref() {
-                tracer_ref.on_error(&locifind_harness::ToolErrorEvent {
-                    tool_id: from_id.clone(),
-                    duration: tool_start.elapsed(),
-                    error_type: "fanout_filename_fallback".to_owned(),
-                });
-                let _ = on_event_ref.send(SearchEvent::BackendSwitched {
-                    from: from_id.clone(),
-                    to: to.to_owned(),
-                    reason: "empty".to_owned(),
-                });
+        // 非语义：各后端结果按序拼接 → fuse_fanout_merge 去重合并。
+        let mut content: Vec<SearchResult> = Vec::new();
+        reduce_collected(
+            collected,
+            &mut sources_queried,
+            &mut errors,
+            |_kind, results| content.extend(results),
+        );
+        let mut fused = fuse_fanout_merge(content);
+
+        // 文件名兜底候选（Everything）：**仅当内容轮干净零结果**时按文件名补召回（兜底罕见触发，
+        // 保持串行），闭合「文件在系统索引/本地索引未覆盖的位置、但文件名含关键词」的盲区。
+        // macOS 无纯文件名后端 → 空 → 兜底永不触发（零行为变化）；取消时不兜底。
+        if fused.is_empty() && !cancel.is_cancelled() {
+            let filename_fallback =
+                IntentRouter::new(deps.registry()).route_filename_fallback(&expanded);
+            if !filename_fallback.is_empty() {
+                // 内容源全空 → 切到 Everything 文件名兜底：发 BackendSwitched 供 UI 提示 + trace 记一条。
+                if let Some(to) = filename_fallback.first().map(|t| t.id().to_owned()) {
+                    deps.tracer.on_error(&locifind_harness::ToolErrorEvent {
+                        tool_id: backends[0].id().to_owned(),
+                        duration: tool_start.elapsed(),
+                        error_type: "fanout_filename_fallback".to_owned(),
+                    });
+                    let _ = on_event.send(SearchEvent::BackendSwitched {
+                        from: backends[0].id().to_owned(),
+                        to,
+                        reason: "empty".to_owned(),
+                    });
+                }
+                // 兜底轮同样并发收集（后端数极少、仅空结果时触发）→ merge。sources/errors 累加两轮。
+                let fb_collected = concurrent_collect(&filename_fallback, &expanded, &cancel).await;
+                let mut fb_content: Vec<SearchResult> = Vec::new();
+                reduce_collected(
+                    fb_collected,
+                    &mut sources_queried,
+                    &mut errors,
+                    |_kind, results| fb_content.extend(results),
+                );
+                fused = fuse_fanout_merge(fb_content);
             }
-        };
-        run_fanout_merge_with_fallback(
-            &backends,
-            &filename_fallback,
-            &expanded,
-            cancel,
-            &mut on_result,
-            &mut on_fallback,
-        )
-        .await
+        }
+        merged = fused;
+        FanoutOutcome {
+            total: merged.len(),
+            sources_queried,
+            errors,
+            route_verdict: None,
+        }
     };
 
     deps.tracer

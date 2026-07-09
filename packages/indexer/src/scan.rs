@@ -17,6 +17,8 @@ use crate::model::{DocumentEntry, ExtractedDoc, IndexStats, MusicEntry};
 use crate::progress::{IndexProgress, NoopProgress};
 use crate::IndexError;
 
+const EXTRACT_CHUNK: usize = 128;
+
 /// 增量索引的存储后端抽象（音乐 / 文档各 impl 一份）。
 pub(crate) trait IncrementalStore {
     /// 一条提取结果（音乐为 `MusicEntry`，文档为 `(DocumentEntry, body)`）。
@@ -209,7 +211,8 @@ pub(crate) fn run_incremental_index<S, F>(
 ) -> Result<IndexStats, IndexError>
 where
     S: IncrementalStore,
-    F: Fn(&Path, i64) -> Result<S::Entry, IndexError>,
+    S::Entry: Send,
+    F: Fn(&Path, i64) -> Result<S::Entry, IndexError> + Sync,
 {
     run_incremental_index_with_progress(store, roots, exts, exclude, extract, &NoopProgress)
 }
@@ -227,7 +230,8 @@ pub(crate) fn run_incremental_index_with_progress<S, F, P>(
 ) -> Result<IndexStats, IndexError>
 where
     S: IncrementalStore,
-    F: Fn(&Path, i64) -> Result<S::Entry, IndexError>,
+    S::Entry: Send,
+    F: Fn(&Path, i64) -> Result<S::Entry, IndexError> + Sync,
     P: IndexProgress + ?Sized,
 {
     // cycle 7-b（Codex OBJECT 2）：老 GlobSet API 走兼容层——包成 basename-only ExcludeFilter
@@ -250,6 +254,13 @@ where
 /// 支持 basename 全局 + per-root 相对路径两层排除。
 /// `normalize_root` 是 root key 归一化 fn（desktop 传 [`crate::scan`] 之外的 `normalize_root_key`，
 /// daemon 或 CLI 可传恒等 fn），保持 indexer 对 desktop 无依赖。
+struct ExtractCandidate {
+    path: PathBuf,
+    path_str: String,
+    ext: String,
+    modified_secs: i64,
+}
+
 pub(crate) fn run_incremental_index_with_filter_and_progress<S, F, N, P>(
     store: &S,
     roots: &[PathBuf],
@@ -261,12 +272,16 @@ pub(crate) fn run_incremental_index_with_filter_and_progress<S, F, N, P>(
 ) -> Result<IndexStats, IndexError>
 where
     S: IncrementalStore,
-    F: Fn(&Path, i64) -> Result<S::Entry, IndexError>,
+    S::Entry: Send,
+    F: Fn(&Path, i64) -> Result<S::Entry, IndexError> + Sync,
     N: Fn(&str) -> String + Copy,
     P: IndexProgress + ?Sized,
 {
+    use rayon::prelude::*;
+
     let mut stats = IndexStats::default();
     let mut seen: HashSet<String> = HashSet::new();
+    let mut to_extract: Vec<ExtractCandidate> = Vec::new();
 
     for root in roots {
         for entry in WalkDir::new(root)
@@ -305,30 +320,48 @@ where
                     stats.skipped += 1;
                     progress.on_file(path, &ext, false);
                 }
-                // 提取器（lofty / pdf-extract / calamine 等）可能对畸形文件 **panic**（非返 Err），
-                // catch_unwind 兜住 → 计 failed 不中断整轮（真机 reindex 撞 pdf-extract panic 暴露）。
-                _ => match catch_extract(|| extract(path, modified_secs)) {
-                    Ok(e) => {
-                        if store.upsert_entry(&e)? {
-                            stats.added += 1;
-                        } else {
-                            stats.updated += 1;
-                        }
-                        // 之前失败过、这轮成功 → 清留痕。
-                        store.clear_extract_failure(&path_str)?;
-                        progress.on_file(path, &ext, true);
+                _ => to_extract.push(ExtractCandidate {
+                    path: path.to_path_buf(),
+                    path_str,
+                    ext,
+                    modified_secs,
+                }),
+            }
+        }
+    }
+
+    // 提取器（lofty / pdf-extract / OCR 等）可能很重；并行段只做文件读取/解析，不碰 DB。
+    // 按块处理，避免十万级文档把正文提取结果一次性堆到内存里；块内仍使用 rayon 并行。
+    for chunk in to_extract.chunks(EXTRACT_CHUNK) {
+        let extracted: Vec<_> = chunk
+            .par_iter()
+            .map(|candidate| {
+                catch_extract(|| extract(candidate.path.as_path(), candidate.modified_secs))
+            })
+            .collect();
+
+        for (candidate, result) in chunk.iter().zip(extracted) {
+            match result {
+                Ok(e) => {
+                    if store.upsert_entry(&e)? {
+                        stats.added += 1;
+                    } else {
+                        stats.updated += 1;
                     }
-                    Err(err) => {
-                        stats.failed += 1;
-                        // 留痕只取失败细节（Tag.path 与表主键重复，不进 reason）。
-                        let reason = match &err {
-                            IndexError::Tag { detail, .. } => detail.clone(),
-                            other => other.to_string(),
-                        };
-                        store.record_extract_failure(&path_str, &reason)?;
-                        progress.on_file(path, &ext, false);
-                    }
-                },
+                    // 之前失败过、这轮成功 => 清留痕。
+                    store.clear_extract_failure(&candidate.path_str)?;
+                    progress.on_file(&candidate.path, &candidate.ext, true);
+                }
+                Err(err) => {
+                    stats.failed += 1;
+                    // 留痕只取失败细节；path 已由表主键记录，避免重复。
+                    let reason = match &err {
+                        IndexError::Tag { detail, .. } => detail.clone(),
+                        other => other.to_string(),
+                    };
+                    store.record_extract_failure(&candidate.path_str, &reason)?;
+                    progress.on_file(&candidate.path, &candidate.ext, false);
+                }
             }
         }
     }

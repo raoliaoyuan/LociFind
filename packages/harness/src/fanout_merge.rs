@@ -32,6 +32,45 @@ pub struct FanoutOutcome {
     pub route_verdict: Option<RouteVerdict>,
 }
 
+/// 纯融合：**非语义** fan-out 路径。输入各后端**按查询顺序**收集拼接的结果，
+/// 交 [`merge_results`] 按 canonical path 去重合并。
+///
+/// 从 [`run_fanout_merge`] 抽出，让「串行查询（daemon/MCP 路径）」与「并发收集
+/// （desktop 路径）」共享**逐字节等价**的合并语义——两侧只需保证喂入的 `collected`
+/// 保持相同的后端顺序即可（合并 tie-break 依赖到达顺序）。
+#[must_use]
+pub fn fuse_fanout_merge(collected: Vec<SearchResult>) -> Vec<MergedResult> {
+    merge_results(collected)
+}
+
+/// 纯融合：**语义** fan-out 路径（加权 RRF + FTS 路由）。输入已按 `backend_kind`
+/// 拆分好的 `fts_list`（非 `SemanticIndex`）与 `vec_list`（`SemanticIndex`），
+/// 各自内部保持后端到达顺序（=rank）。返回融合结果 + [`RouteVerdict`]
+/// （`query_lang` 由 `detect_lang(query)` 后置覆写填真值，其余字段来自 wrapper）。
+///
+/// 从 [`run_fanout_merge_rrf`] 抽出，让串行查询与并发收集共享逐字节等价的融合语义。
+/// 参数与现状一致：`DEFAULT_RRF_K` + `DEFAULT_COSINE_ROUTING_THRESHOLD`。
+#[must_use]
+pub fn fuse_fanout_rrf(
+    fts_list: Vec<SearchResult>,
+    vec_list: Vec<SearchResult>,
+    semantic_weight: f64,
+    query: &str,
+) -> (Vec<MergedResult>, RouteVerdict) {
+    let (merged, verdict) = fuse_rrf_with_fts_routing(
+        fts_list,
+        vec_list,
+        DEFAULT_RRF_K,
+        semantic_weight,
+        DEFAULT_COSINE_ROUTING_THRESHOLD,
+    );
+    let verdict = RouteVerdict {
+        query_lang: detect_lang(query),
+        ..verdict
+    };
+    (merged, verdict)
+}
+
 /// 同时查询 `backends` 中所有后端、归一化合并后逐条 `on_result`。
 ///
 /// 顺序对每个后端 `search_expanded` → 收集流 → 累积；任一后端 pre-stream Err 或流中途 Err
@@ -82,7 +121,7 @@ where
         }
     }
 
-    let merged = merge_results(collected);
+    let merged = fuse_fanout_merge(collected);
     let total = merged.len();
     for m in merged {
         on_result(m);
@@ -170,18 +209,8 @@ where
 
     // BETA-15B-3 A-5：wrapper 5 参（cosine_threshold 替换 A-4 6 参的 lang 信号 + max）。
     // 任一臂空 → wrapper 内 early-return guard 兜底；wrapper 内部 verdict.query_lang
-    // 默认 Mixed 占位、wiring 后置覆写填真值（BETA-15B-5 badge 元数据）。
-    let (merged, verdict) = fuse_rrf_with_fts_routing(
-        fts_list,
-        vec_list,
-        DEFAULT_RRF_K,
-        semantic_weight,
-        DEFAULT_COSINE_ROUTING_THRESHOLD,
-    );
-    let verdict = RouteVerdict {
-        query_lang: detect_lang(query),
-        ..verdict
-    };
+    // 默认 Mixed 占位、fuse_fanout_rrf 用 detect_lang(query) 后置覆写填真值（BETA-15B-5 badge 元数据）。
+    let (merged, verdict) = fuse_fanout_rrf(fts_list, vec_list, semantic_weight, query);
     let total = merged.len();
     for m in merged {
         on_result(m);
@@ -640,6 +669,88 @@ mod tests {
         let v = outcome.route_verdict.expect("RRF 路径应填 route_verdict");
         assert_eq!(v.query_lang, locifind_result_normalizer::lang::Lang::Mixed);
         assert!((v.vec_top1_cosine - 0.40).abs() < f64::EPSILON);
+    }
+
+    // ===== 纯 fuse 函数：直接喂预构建列表，验与 run_ 系列逐字节等价 =====
+
+    #[test]
+    fn fuse_fanout_merge_dedups_by_path() {
+        // /b 双源（filename + 更富 metadata）→ 合并去重后 3 条、/b 取富 metadata。
+        let mut rich_b = result_at("/b", BackendKind::NativeIndex, MatchType::Metadata);
+        rich_b.metadata.artist = Some("周华健".to_owned());
+        let collected = vec![
+            result_at("/a", BackendKind::Spotlight, MatchType::Filename),
+            result_at("/b", BackendKind::Spotlight, MatchType::Filename),
+            rich_b,
+            result_at("/c", BackendKind::NativeIndex, MatchType::Content),
+        ];
+        let merged = fuse_fanout_merge(collected);
+        assert_eq!(merged.len(), 3);
+        let b = merged
+            .iter()
+            .find(|m| m.result.path == std::path::Path::new("/b"))
+            .unwrap();
+        assert_eq!(b.sources.len(), 2);
+        assert_eq!(b.result.metadata.artist.as_deref(), Some("周华健"));
+    }
+
+    #[test]
+    fn fuse_fanout_rrf_fuses_and_overrides_query_lang() {
+        // FTS 臂 [A, B]、VEC 臂 [B, C]（cosine 0.1 不跳 FTS）→ B 双臂命中 + 语义加权排第一；
+        // 共 3 条；query_lang 由 detect_lang 覆写为 Zh。
+        let fts = vec![
+            result_at("/a", BackendKind::NativeIndex, MatchType::Content),
+            result_at("/b", BackendKind::NativeIndex, MatchType::Content),
+        ];
+        let vec_list = vec![
+            {
+                let mut r = result_at("/b", BackendKind::SemanticIndex, MatchType::Content);
+                r.score = Some(0.10);
+                r
+            },
+            result_at("/c", BackendKind::SemanticIndex, MatchType::Content),
+        ];
+        let (merged, verdict) = fuse_fanout_rrf(fts, vec_list, 10.0, "年假规定");
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].result.path, std::path::Path::new("/b"));
+        assert_eq!(merged[0].sources.len(), 2);
+        assert_eq!(
+            verdict.query_lang,
+            locifind_result_normalizer::lang::Lang::Zh
+        );
+        assert!((verdict.vec_top1_cosine - 0.10).abs() < f64::EPSILON);
+        assert!(!verdict.skipped_fts);
+    }
+
+    #[test]
+    fn fuse_fanout_rrf_high_cosine_skips_fts() {
+        // VEC top-1 cosine 0.9 → T* < 0.9 时跳 FTS（占位 T*>0.9 时退化不跳）；用 `||` 守护占位。
+        let fts = vec![result_at(
+            "/annual_leave.md",
+            BackendKind::NativeIndex,
+            MatchType::Filename,
+        )];
+        let vec_list = vec![{
+            let mut r = result_at(
+                "/year_off_rules.md",
+                BackendKind::SemanticIndex,
+                MatchType::Content,
+            );
+            r.score = Some(0.9);
+            r
+        }];
+        let (_merged, verdict) = fuse_fanout_rrf(fts, vec_list, 10.0, "annual leave policy");
+        assert_eq!(
+            verdict.query_lang,
+            locifind_result_normalizer::lang::Lang::En
+        );
+        assert!((verdict.vec_top1_cosine - 0.9).abs() < f64::EPSILON);
+        assert!(
+            verdict.skipped_fts
+                || locifind_result_normalizer::DEFAULT_COSINE_ROUTING_THRESHOLD > 0.9,
+            "T*={} 下 cosine=0.9 应跳 FTS（或 spec §5 降级 T*>0.9 时不跳）",
+            locifind_result_normalizer::DEFAULT_COSINE_ROUTING_THRESHOLD
+        );
     }
 
     #[test]

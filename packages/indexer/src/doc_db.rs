@@ -9,8 +9,8 @@ use rusqlite::types::ToSql;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::db::{
-    fts_sanitize, path_is_under, root_glob_params, root_glob_predicate, short_metadata_like_terms,
-    unix_now,
+    configure_common_db_pragmas, configure_file_db_pragmas, fts_sanitize, path_is_under,
+    root_glob_params, root_glob_predicate, short_metadata_like_terms, unix_now,
 };
 use crate::model::{
     DocumentEntry, DocumentHit, DocumentPreview, DocumentQuery, ExtractedDoc, ExtractionFailure,
@@ -121,18 +121,23 @@ impl DocumentIndex {
     /// 打开（或创建）索引数据库并建表。
     pub fn open(db_path: &Path) -> Result<Self, IndexError> {
         let conn = Connection::open(db_path)?;
-        Self::from_conn(conn)
+        Self::from_conn(conn, true)
     }
 
     /// 内存库（测试用）。
     pub fn open_in_memory() -> Result<Self, IndexError> {
         let conn = Connection::open_in_memory()?;
-        Self::from_conn(conn)
+        Self::from_conn(conn, false)
     }
 
-    fn from_conn(conn: Connection) -> Result<Self, IndexError> {
+    fn from_conn(conn: Connection, file_backed: bool) -> Result<Self, IndexError> {
         // reindex 写与 search 读可能并发（BETA-04），给锁等待留 5s 窗口。
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        if file_backed {
+            configure_file_db_pragmas(&conn)?;
+        } else {
+            configure_common_db_pragmas(&conn)?;
+        }
         // document_vectors 外键级联依赖此 PRAGMA（默认关）。
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.execute_batch(SCHEMA)?;
@@ -1774,6 +1779,20 @@ mod tests {
         let conn = Connection::open(&path).unwrap();
         let v = crate::version::read_schema_version(&conn).unwrap();
         assert_eq!(v.as_deref(), Some(crate::version::INDEXER_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn file_open_enables_wal_journal_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("documents.db");
+        {
+            let _idx = DocumentIndex::open(&path).unwrap();
+        }
+        let conn = Connection::open(&path).unwrap();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode.to_ascii_lowercase(), "wal");
     }
 
     /// BETA-33 cycle 5：`stats_under_root` 按 root 前缀 + 类型分桶 + 上次索引时间，

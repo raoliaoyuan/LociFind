@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 pub fn clear_index(db_path: &Path) -> Result<(), IndexError> {
     let conn = Connection::open(db_path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    configure_file_db_pragmas(&conn)?;
     // VACUUM 不可在事务内执行；execute_batch 不包显式事务，逐句 autocommit，故可与 DROP 同批。
     // schema_meta 故意保留：它描述 db schema 代数（不是数据），clear 数据不改 schema。
     conn.execute_batch(
@@ -73,6 +74,16 @@ pub fn clear_index(db_path: &Path) -> Result<(), IndexError> {
 }
 
 /// 音乐 metadata 索引（持有一个 SQLite 连接）。
+pub(crate) fn configure_file_db_pragmas(conn: &Connection) -> Result<(), IndexError> {
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    configure_common_db_pragmas(conn)
+}
+
+pub(crate) fn configure_common_db_pragmas(conn: &Connection) -> Result<(), IndexError> {
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct MusicIndex {
     conn: Connection,
@@ -94,18 +105,23 @@ impl MusicIndex {
     /// 打开（或创建）索引数据库并建表。
     pub fn open(db_path: &Path) -> Result<Self, IndexError> {
         let conn = Connection::open(db_path)?;
-        Self::from_conn(conn)
+        Self::from_conn(conn, true)
     }
 
     /// 内存库（测试用）。
     pub fn open_in_memory() -> Result<Self, IndexError> {
         let conn = Connection::open_in_memory()?;
-        Self::from_conn(conn)
+        Self::from_conn(conn, false)
     }
 
-    fn from_conn(conn: Connection) -> Result<Self, IndexError> {
+    fn from_conn(conn: Connection, file_backed: bool) -> Result<Self, IndexError> {
         // reindex 写与 search 读可能并发（BETA-04），给锁等待留 5s 窗口。
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        if file_backed {
+            configure_file_db_pragmas(&conn)?;
+        } else {
+            configure_common_db_pragmas(&conn)?;
+        }
         conn.execute_batch(SCHEMA)?;
         migrate_music_fts(&conn)?;
         // BETA-32 C1b：老 db 第一次打开 → INSERT schema 版本；已有则 no-op。
@@ -842,6 +858,20 @@ mod tests {
         let conn = Connection::open(&path).unwrap();
         let v = crate::version::read_schema_version(&conn).unwrap();
         assert_eq!(v.as_deref(), Some(crate::version::INDEXER_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn file_open_enables_wal_journal_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("music.db");
+        {
+            let _idx = MusicIndex::open(&path).unwrap();
+        }
+        let conn = Connection::open(&path).unwrap();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode.to_ascii_lowercase(), "wal");
     }
 
     /// BETA-33 cycle 5：`stats_under_root` 按 root 前缀边界统计音乐条数 + 上次索引，

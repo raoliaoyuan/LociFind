@@ -507,7 +507,8 @@ pub use fallback_chain::{run_fallback_chain, BackendSwitch, ChainOutcome, Switch
 
 pub mod fanout_merge;
 pub use fanout_merge::{
-    run_fanout_merge, run_fanout_merge_rrf, run_fanout_merge_with_fallback, FanoutOutcome,
+    fuse_fanout_merge, fuse_fanout_rrf, run_fanout_merge, run_fanout_merge_rrf,
+    run_fanout_merge_with_fallback, FanoutOutcome,
 };
 pub use locifind_result_normalizer::MergedResult;
 

@@ -62,6 +62,10 @@ getrandom = "0.2"
 # default-features=false 关 default-tls 避免 openssl 平台依赖、用 pure-rust rustls。
 reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
 futures-util = "0.3"
+# Track A 搜索并发化：spawn_blocking 线程内用 futures_executor::block_on 驱动各后端
+# search_expanded 流（后端为同步阻塞体、无 tokio reactor 需求，故用 runtime 无关的
+# 单线程 executor，不与 tauri 全局 tokio runtime 耦合）。
+futures-executor = "0.3"
 
 # BETA-31-v3 cycle 2（v0.8.3）：诊断日志栈。默认 INFO 级别写文件到
 # <locifind_data_dir>/locifind.log（daily 滚动），env LOCIFIND_LOG 可覆盖

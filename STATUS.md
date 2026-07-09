@@ -6,7 +6,7 @@
 
 ## 📍 速览
 
-- **阶段**：B（Beta）进行中（**v0.9.26 已 bump + 推 tag 发版**——在 v0.9.24〔BETA-56〕/v0.9.25〔BETA-57 多词 AND→OR 兜底〕上并入 **BETA-58 MCP 接入体验 + BETA-59 PII 概念检索**；`v0.9.26` tag 已推、触发 CI 双平台发布）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
+- **阶段**：B（Beta）进行中（v0.9.26 已发版；**BETA-60 检索+索引性能优化已并入 main、待发 v0.9.27**——搜索 fan-out 串行→并发〔总耗时求和改取最慢〕+ 索引开 WAL/synchronous=NORMAL〔消每文件 fsync〕+ 文档提取分块 rayon 并行）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
 - **当前 task**：**2026-07-09 Codex 查身份证文件复盘 → BETA-58/59 分派两 CLI 并落地（并入 main 待发版）**——用户带 Codex 全程截图（手搓 HTTP 3m52s）问「工具/MCP 还能优化啥」。Claude Code 当项目经理拆两条不重叠赛道并行：**BETA-58 接入体验**（前端子代理：McpPane 客户端切换 + Codex `mcp add` 命令 + MSIX 重登警告 + curl 全 Accept 头）+ **BETA-59 PII 概念检索**（Codex CLI：索引时识别身份证〔GB 11643 校验〕/手机号、注入类型关键词到 FTS，「身份证」概念词召回）。Claude Code 复核双 diff、跑通 tsc/clippy/test。**已发 v0.9.26**（BETA-57+58+59 一并 bump、推 tag 触发 CI 双平台发布）。BETA-59 生效需重建索引。
 - **下一步 top-3**：① **设计伙伴/首个真实部署主动获取**（护城河 P0，ROADMAP §5；BETA-40 真实内网证据/BETA-44 语料扩充均以此为前提）；② **macOS 真机整体待跑**（出场线 Class A 唯一剩项；**v0.9.23 macOS DMG 已产出、具备真机测试前提**；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；③ BETA-53 可选复核：真 Claude Code 进程连 `~/.claude/settings.json` 走一遍（[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）。
@@ -14,7 +14,7 @@
 
 ## 当前 Task
 
-**2026-07-09（最新）**：**Codex 查身份证文件复盘 → 分派两 CLI 落地 BETA-58/59**（Claude Code 当项目经理，详见会话日志）。用户带 Codex 全程截图（挂不上 MCP、手搓 HTTP 逆向 3m52s、概念词搜不到身份证）问「工具/MCP 还能优化啥」。诊断根因：McpPane「接入配置」只给 Claude 风格 JSON、Codex 不吃 → 全程自救；「身份证」概念词 0 命中（正文有号码无字面标签、无实体标签映射）。拆**两条不重叠赛道并行**：**BETA-58 接入体验（前端子代理，`apps/desktop`）**——McpPane 加客户端切换 tab（Claude/Codex/curl），Codex 栏给 `setx`+`codex mcp add --bearer-token-env-var` 两命令 + **MSIX 注销重登警告**，curl 栏带全三头（`Accept: application/json, text/event-stream`）+ PS/Invoke-WebRequest 提示；抽 `CopyBlock`；同步 `apps/daemon/README §4`；tsc exit 0。**BETA-59 PII 概念检索（Codex CLI，`packages/indexer`+`locifind-server`）**——新 `pii.rs`（身份证 GB 11643 校验位 + 手机号 `1[3-9]\d{9}`，带 alnum 边界防子串误判）、`doc_db.rs` 单一 FTS 写入路径注入**类型关键词**（`身份证/手机号…`，隐私红线只注类型词不复制号码、单测锁）、`search.rs`/`mcp.rs` 描述同步；「身份证」3 字 trigram 命中；indexer 192 + server 93 全绿、clippy/fmt 净。**Claude Code 复核**：确认注入点唯一且经 `upsert_document` 汇流、`documents_fts` 非 content= 注入安全；发现并权衡「仅命中注入词时 snippet 可能回显关键词」边缘（多数证件扫描件自带标签不触发）→ 记 `entity` 独立列为后续。**生效需重建索引**（BETA-59 同 BETA-55）。待推 **v0.9.26**（BETA-57+58+59 一并发）。
+**2026-07-09（最新²）**：**BETA-60 检索+索引性能优化（分派双赛道并行）**。用户真机反馈搜「身份证」1965ms（fan-out 四臂）+ 索引慢，要 Claude Code 当项目经理拆活给本地 Claude CLI 与 Codex CLI 并监督、下版问题都解决。诊断：搜索 fan-out **串行 await**（各后端耗时相加、Windows Search powershell+ADODB 冷启动最大头）；索引 walk 单线程 + 每文件事务 + **未开 WAL**（每文件 fsync）+ 提取/OCR 无并发。拆**文件不重叠**双赛道并行：**Track A 搜索并发化**（本地 Claude，`packages/harness`+`apps/desktop/fanout.rs`）= harness 抽纯 fuse 函数保语义 + desktop `spawn_blocking` 并发查各后端（求和→取最慢）；**Track B 索引提速**（Codex CLI，`packages/indexer`）= WAL+`synchronous=NORMAL` 消 fsync + `scan.rs` 128/块 rayon 并行提取（仿音乐 `index_paths` 三段式、限内存保进度、DB 写不并行、embedding 不动）。**复核**：逐段核 desktop 并发编排（取消/兜底/sources/errors 对齐）+ 令 Codex 把首版全量堆内存改分块；**集成校验** `cargo check -p locifind-desktop`〔server/backends 调用方随 `Send`/`Sync` bound 一起过〕+ harness 191/indexer 194/clippy/fmt 全绿。**搜索不需重建索引；WAL/并行提取下次构建生效**。待发 **v0.9.27**。**未尽**：Windows/Everything 常驻宿主、embedding batch/context 复用、fan-out 软超时留后续轮。详见会话日志。（BETA-58/59 详录见会话日志）
 
 ## 下一步
 
@@ -38,6 +38,10 @@
 ## 会话日志
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
+
+### 2026-07-09 — Claude Code (Opus 4.8) — BETA-60 检索+索引性能优化（双赛道并行）
+
+**承接**：用户真机反馈搜「身份证」1965ms（fan-out local+semantic+windows+everything 四臂）+ 索引慢，要 Claude Code 当项目经理分派本地 Claude CLI 与 Codex CLI 并监督、尽量不打扰、下版问题都解决。**诊断**（两 Explore 代理并行摸链路）：搜索 fan-out `fanout_merge.rs` 串行 await 各后端耗时**相加**、Windows Search 每查 spawn powershell+ADODB 冷启动是最大单头；索引 `scan.rs` walk 单线程 + 每文件事务 + **未开 WAL**（每文件 fsync）+ 提取/OCR 无并发。**分派**（文件不重叠双赛道并行）：Track A 搜索并发化（本地 Claude 子代理，harness+desktop）、Track B 索引提速（Codex CLI `codex exec --sandbox workspace-write`，indexer），两者禁碰 git/STATUS/ROADMAP。**产出**：A = harness 抽纯 fuse 函数（语义逐字节等价、daemon 路径改调它）+ desktop `concurrent_collect` 用 `spawn_blocking`+`block_on` 并发查各后端按原序回收（求和→取最慢）；B = 文件型库开 WAL+`synchronous=NORMAL`（内存库兜底）+ `scan.rs` 128/块 rayon 并行提取（串行预检→并行提取→串行写库/进度）。**复核**：逐段核 desktop 并发编排取消/兜底/顺序对齐；Codex 首版全量堆内存 → 令其改分块（限内存尖峰+保实时进度）；集成 `cargo check -p locifind-desktop`〔server/backends 调用方随 `Send`/`Sync` bound 一起过〕+ harness 191/indexer 194/clippy/fmt 全绿。**未尽**：Windows/Everything 常驻宿主、embedding batch/context 复用（涉 RAM/共享 runtime 风险高本轮不做）、fan-out 软超时。搜索不需重建索引、WAL/并行提取下次构建生效。待发 **v0.9.27**。
 
 ### 2026-07-09 — Claude Code (Opus 4.8) — 分派两 CLI 落地 BETA-58/59（MCP 接入体验 + PII 概念检索）
 
