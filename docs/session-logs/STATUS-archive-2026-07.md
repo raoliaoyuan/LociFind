@@ -5,6 +5,13 @@
 > 后续会话的详录写入 session-details-YYYY-MM.md、溢出摘要滚动追加到本文件。
 
 ---
+### 2026-07-09 — Claude Code (Opus 4.8) — BETA-57 多词查询组间 AND→OR 召回兜底
+
+**承接**：用户经 MCP 查体检材料，报「`体检 体检报告 健康检查 健康体检` 泛查 0 命中、单词能命中」。诊断纠偏：并非我起初判的 `fts_sanitize` 短语化（那条只在无词组的 raw-text 兜底触发、生产不走），真因是 `fts_match_from_groups` **组间 AND**——parser 拆多词组、缺任一词即整条结构性归零。`爱康`(2 字正文词)另属 BETA-56 兜底不扫 body 的已知边界 + 验证 daemon 跑 dummy.gguf 语义臂死，非本次范围。
+**产出（方案 A：AND 优先 + 0 命中 OR 兜底）**：`search_results_expanded`（desktop+MCP 收敛点）AND 空且 ≥2 有效词组时经新 `fts_or_relax_from_groups` 放宽组间 OR 重试一次；零精确性回归（仅空时触发）；抽 `sanitized_group_terms` 消重。local-index +2 测试（单元 + 端到端复现体检报告场景 + AND 命中不受影响对照），29 全绿 / clippy `-D warnings` / fmt 净。查询侧改动**不需重建索引**。
+**收尾（同日续）**：重编 `locifindd`〔release+llama-cpp，4m46s〕+ desktop NSIS〔6m40s〕→ **bump v0.9.25**（tauri.conf/Cargo.toml/lock）→ **真机 MCP 验证达成**：另编 FTS-only stub daemon〔dummy.gguf〕挂体检语料，`健康检查` 单搜 0（缺席）/ 多词 `体检 体检报告 健康检查 健康体检`〔含缺席词、旧 AND 必 0〕经 OR 兜底命中，audit.jsonl 三条 results 佐证。待推 `v0.9.25` tag 触发 CI 发布。分析层（「总结健康状态」）仍是外部 LLM 的活、LociFind 只管检索（范围不变）。
+
+---
 ### 2026-07-08 — Claude Code (Opus 4.8) — Codex↔MCP 接线 + BETA-54/55 + v0.9.23 双平台发布
 
 **承接**：用户带 Codex 截图问「是否绕过 MCP」→ 实锤 Codex 从没挂上（Claude JSON 没进 Codex TOML）；修接线后稳走 MCP（详见「当前 Task」）。

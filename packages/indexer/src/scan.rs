@@ -29,6 +29,14 @@ const EXTRACT_CHUNK: usize = 64;
 /// 线程池**把同时进行的重量级提取压到少数几个：既保留多文件并行的提速，又不放任子进程风暴。
 const EXTRACT_PARALLELISM: usize = 4;
 
+/// 提取线程池栈大小（64 MiB）。**关键**：pdf-extract / lopdf 解析深层嵌套或畸形 PDF 时
+/// 递归很深，rayon worker 的 std 默认栈（Windows ≈2 MiB）会被撑爆 → `STATUS_STACK_OVERFLOW`
+/// （0xC00000FD）。栈溢出是 SEH 异常、**不是 panic**，`catch_extract` 的 `catch_unwind`
+/// 与 release 的 `panic = "unwind"` 都兜不住，会直接 abort 整个 app（真机撞：偶发、单机、
+/// 故障模块为 exe 自身、偏移固定）。并发已被 [`EXTRACT_PARALLELISM`] 限死，栈按需提交，
+/// 64 MiB×少数线程的保留成本可忽略。
+const EXTRACT_STACK_SIZE: usize = 64 * 1024 * 1024;
+
 /// 增量索引的存储后端抽象（音乐 / 文档各 impl 一份）。
 pub(crate) trait IncrementalStore {
     /// 一条提取结果（音乐为 `MusicEntry`，文档为 `(DocumentEntry, body)`）。
@@ -352,6 +360,7 @@ where
     );
     let extract_pool = rayon::ThreadPoolBuilder::new()
         .num_threads(n_threads)
+        .stack_size(EXTRACT_STACK_SIZE)
         .build()
         .ok();
 

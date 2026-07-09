@@ -6,7 +6,7 @@
 
 ## 📍 速览
 
-- **阶段**：B（Beta）进行中（v0.9.27 发版并入 **BETA-60 检索+索引性能优化**〔搜索 fan-out 串行→并发 + 索引 WAL + 提取分块并行〕；**v0.9.28 热修 BETA-60 两处索引回退**——①`on_file` 放并行块尾串行段致「进度全冻、误判卡死」→ 下沉并行段逐文件上报；②提取按核数无限并行致扫描 PDF 的 `pdftoppm`+OCR 子进程风暴（真机首索引卡「0/50」、17 个 pdftoppm 并发）→ 受限线程池压到 4 路；数据无损、真机崩溃恢复已验）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
+- **阶段**：B（Beta）进行中（**v0.9.29 热修真机栈溢出崩溃**——某台机装机后偶发崩，异常码 `0xC00000FD`〔`STATUS_STACK_OVERFLOW`〕、故障模块为 `locifind-desktop.exe` 自身：根因是 `pdf-extract`/`lopdf` 解析深层 PDF 递归过深撑爆 rayon 提取 worker 的默认 ~2 MiB 栈；栈溢出是 SEH 非 panic，现有 `catch_unwind`/`panic=unwind` 兜不住 → 给提取线程池设 `stack_size=64 MiB`；纯运行期修复、不需重建索引；v0.9.27 并入 BETA-60、v0.9.28 热修 BETA-60 两处索引回退）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
 - **当前 task**：**2026-07-09 Codex 查身份证文件复盘 → BETA-58/59 分派两 CLI 并落地（并入 main 待发版）**——用户带 Codex 全程截图（手搓 HTTP 3m52s）问「工具/MCP 还能优化啥」。Claude Code 当项目经理拆两条不重叠赛道并行：**BETA-58 接入体验**（前端子代理：McpPane 客户端切换 + Codex `mcp add` 命令 + MSIX 重登警告 + curl 全 Accept 头）+ **BETA-59 PII 概念检索**（Codex CLI：索引时识别身份证〔GB 11643 校验〕/手机号、注入类型关键词到 FTS，「身份证」概念词召回）。Claude Code 复核双 diff、跑通 tsc/clippy/test。**已发 v0.9.26**（BETA-57+58+59 一并 bump、推 tag 触发 CI 双平台发布）。BETA-59 生效需重建索引。
 - **下一步 top-3**：① **设计伙伴/首个真实部署主动获取**（护城河 P0，ROADMAP §5；BETA-40 真实内网证据/BETA-44 语料扩充均以此为前提）；② **macOS 真机整体待跑**（出场线 Class A 唯一剩项；**v0.9.23 macOS DMG 已产出、具备真机测试前提**；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；③ BETA-53 可选复核：真 Claude Code 进程连 `~/.claude/settings.json` 走一遍（[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）。
@@ -14,14 +14,14 @@
 
 ## 当前 Task
 
-**2026-07-09（最新²）**：**BETA-60 检索+索引性能优化（分派双赛道并行）**。用户真机反馈搜「身份证」1965ms（fan-out 四臂）+ 索引慢，要 Claude Code 当项目经理拆活给本地 Claude CLI 与 Codex CLI 并监督、下版问题都解决。诊断：搜索 fan-out **串行 await**（各后端耗时相加、Windows Search powershell+ADODB 冷启动最大头）；索引 walk 单线程 + 每文件事务 + **未开 WAL**（每文件 fsync）+ 提取/OCR 无并发。拆**文件不重叠**双赛道并行：**Track A 搜索并发化**（本地 Claude，`packages/harness`+`apps/desktop/fanout.rs`）= harness 抽纯 fuse 函数保语义 + desktop `spawn_blocking` 并发查各后端（求和→取最慢）；**Track B 索引提速**（Codex CLI，`packages/indexer`）= WAL+`synchronous=NORMAL` 消 fsync + `scan.rs` 128/块 rayon 并行提取（仿音乐 `index_paths` 三段式、限内存保进度、DB 写不并行、embedding 不动）。**复核**：逐段核 desktop 并发编排（取消/兜底/sources/errors 对齐）+ 令 Codex 把首版全量堆内存改分块；**集成校验** `cargo check -p locifind-desktop`〔server/backends 调用方随 `Send`/`Sync` bound 一起过〕+ harness 191/indexer 194/clippy/fmt 全绿。**搜索不需重建索引；WAL/并行提取下次构建生效**。待发 **v0.9.27**。**未尽**：Windows/Everything 常驻宿主、embedding batch/context 复用、fan-out 软超时留后续轮。详见会话日志。（BETA-58/59 详录见会话日志）
+**2026-07-09（最新³）**：**v0.9.29 热修真机栈溢出崩溃（PDF 提取递归撑爆线程栈）**。用户报某台 Windows 装机后偶发崩溃，异常码 `0xC00000FD`（`STATUS_STACK_OVERFLOW`）、故障模块 `locifind-desktop.exe` 自身、偏移固定。诊断：索引期 `pdf-extract 0.10`（内部 `lopdf`，静态链进 exe）解析深层嵌套/畸形 PDF 时递归很深，BETA-60 新建的受限提取 rayon 线程池（[scan.rs](packages/indexer/src/scan.rs)）未设栈大小、worker 拿 std 默认 ≈2 MiB → 被撑爆。**关键**：栈溢出是 SEH 异常、**不是 panic**，`catch_extract` 的 `catch_unwind` 与 release 的 `panic="unwind"` 都兜不住，直接 abort 整个 app——完美吻合「偶发/单机/模块为 exe/偏移固定」。**修**：给 `extract_pool` 加 `stack_size=64 MiB`（新常量 `EXTRACT_STACK_SIZE`，并发已被 `EXTRACT_PARALLELISM=4` 限死、栈按需提交、开销可忽略）；改的是共享 `locifind-indexer` crate，desktop + `locifindd` 两侧同受益。indexer scan 测试 44/44 + clippy 净。**纯运行期修复、不需重建索引**，重构建即生效。待发 **v0.9.29**。**未尽**：若同机仍复现（真·成环递归），再上 PDF 提取子进程隔离；可向用户取触发 PDF 做回归 fixture。
 
 ## 下一步
 
 1. **BETA-53 剩余真机项**（功能级 + 真机 GUI 全流程已验，[报告](docs/reviews/beta-53-mcp-service-verify-2026-07-07.md)：harness 跑通 §2/§3/§4 + computer-use 驱动 dev app 实点——菜单/tab 路由·开关联动后端起停·token/配置片段复制·自启·旧设置迁移·对实跑 app curl 全通过）：**仅剩** ① 真 Claude Code 进程实连（协议已 curl 验过）、② 语义命中（`semantic-recall` 构建路径 B）——均依赖用户。
 2. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
 3. **真机验证剩余项**（Windows 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)：BETA-47/50/51/52/29〔v1+v2〕/33〔单实例锁·设置流〕 + 基础搜索 + BETA-12 卸载·升级）——**Windows 仅剩**：BETA-49 音乐发现不越界（依赖目录配置）、BETA-43 出处/`read_document`/审计导出（[playbooks README](docs/playbooks/README.md) 第 8/9 条，需 daemon + 外部 LLM；**其中 `read_document` 正斜杠 root round-trip bug 本轮已修**）、BETA-33 cycle 9 WSearch 状态条 / 全库-概貌口径差；**macOS 整体待跑**（按 [manual-test-scenarios](docs/manual-test-scenarios.md)）。
-4. **发版进度**：v0.9.18/19（BETA-47-52）→ **v0.9.20**（BETA-53 本机 MCP）→ **v0.9.21**（MCP token 两修）→ **v0.9.23**（并入 BETA-54 数字检索 + BETA-55 最后保存者；v0.9.22 中间态已折入，[Release](https://github.com/raoliaoyuan/LociFind/releases/tag/v0.9.23) 双平台齐）→ **v0.9.24**（并入 BETA-56 短 CJK 兜底）。并发机制累计稳。
+4. **发版进度**：…→ **v0.9.24**（BETA-56 短 CJK 兜底）→ **v0.9.25**（BETA-57 AND→OR 兜底）→ **v0.9.26**（BETA-57/58/59）→ **v0.9.27**（BETA-60 检索+索引性能）→ **v0.9.28**（热修 BETA-60 两处索引回退）→ **v0.9.29**（热修真机栈溢出崩溃：PDF 提取线程池加 64 MiB 栈）。**待推 `v0.9.29` tag 触发 CI 双平台发布**。并发机制累计稳。
 5. **BETA-10 剩余**：macOS DMG 产物 CI done 且 **v0.9.15 首验通过**；剩 macOS 真机放行验证（§6.3）；winget 待 BETA-14 后 / Homebrew tap 可启动（DMG CI 已跑通）。
 6. **BETA-40 真实内网证据**：唯一剩余验收项，依赖 ②。
 7. **剩余 6 条 partial**（不阻塞出场线，[beta-exit §3.4](docs/reviews/beta-exit.md)）：全为 v0.5 标注锁定项（markdown ft / 「上个月下载的」动词歧义 / 项目归档 location / downloads hint 双语 ×2，改标注吃 §6.5 豁免额度）+ 备份文件两难。parser 可确定性收割已见底。
@@ -39,6 +39,10 @@
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
 
+### 2026-07-09 — Claude Code (Opus 4.8) — v0.9.29 热修：真机栈溢出崩溃（PDF 提取递归撑爆线程栈）
+
+**承接**：用户报某台 Windows 装机后偶发崩溃，异常码 `0xC00000FD`（`STATUS_STACK_OVERFLOW`）、故障模块 `locifind-desktop.exe` 自身、偏移 `0xc4c842` 固定。**诊断**（读 indexer 提取链）：索引期 `pdf-extract 0.10`（内部 `lopdf`、静态链进 exe）解析深层嵌套/畸形 PDF 时递归很深；BETA-60 新建的受限提取 rayon 线程池（[scan.rs:~360](packages/indexer/src/scan.rs)）**未设栈大小**，worker 拿 std 默认 ≈2 MiB → 被撑爆。**关键洞察**：栈溢出是 SEH 异常、**不是 panic**——[scan.rs:616](packages/indexer/src/scan.rs) 注释只覆盖 panic 一路，`catch_extract` 的 `catch_unwind` 与 release `panic="unwind"`（[Cargo.toml:107](apps/desktop/src-tauri/Cargo.toml)）都拦不住，直接 abort 整个 app；完美吻合「偶发/单机/模块为 exe/偏移固定」。**产出**：给 `extract_pool` 加 `.stack_size(64 MiB)`（新模块级常量 `EXTRACT_STACK_SIZE` + 根因 doc 注释；并发已被 `EXTRACT_PARALLELISM=4` 限死、栈按需提交、开销可忽略）；改的是共享 `locifind-indexer` crate → desktop + `locifindd` 两侧同受益。indexer scan 测试 44/44 通过、clippy 净（常量移模块级避 `items_after_statements`）。**纯运行期修复、不需重建索引**，重构建即生效。bump **v0.9.29**（tauri.conf/Cargo.toml/lock）。**未尽事宜**：若同机仍复现（真·成环递归 64 MiB 也救不了），再上 PDF 提取**子进程隔离**（崩了只丢一个文件）；可向用户取触发崩溃的 PDF 做回归 fixture 坐实「深但有限 vs 成环」。待推 `v0.9.29` tag 触发 CI 双平台发布。
+
 ### 2026-07-09 — Claude Code (Opus 4.8) — v0.9.28 热修：BETA-60 索引进度回退（误判卡死）
 
 **承接**：用户装 v0.9.27 后，索引中途硬关程序、重开感觉「进度卡死不动」。**现场取证**（Claude Code 直接在用户 Windows 机上 tasklist/sqlite3 只读排查）：装的确是 0.9.27；主库 `%APPDATA%\LociFind\index.db` **完好**——WAL 模式崩溃恢复成功、已 checkpoint 归零、documents=67 + passages=51 在，**我这轮 WAL 改动未致数据丢失**（一度 `sqlite3 -readonly` 读到 0 是没应用 WAL 的旧快照虚惊，WAL-aware `mode=ro` 读到 67）；无 desktop 派生的卡住 OCR 子进程；WAL 时间戳在重开后仍前进＝索引其实在跑。**真因**：BETA-60 Track B 把 `on_file` 放在「128/块并行提取完的块尾串行段」，一块处理期间进度计数器完全不动，块内有慢文件（大 PDF/图 OCR）就冻几十秒→误判卡死。**修①（进度冻结）**：`scan.rs` 把 `on_file` 下沉进并行 `par_iter` map、逐文件提取完即报（`IndexProgress` 本 `Send+Sync` 专为跨线程设计）；串行段不再重复 on_file；`EXTRACT_CHUNK` 128→64。**修②（子进程风暴，同轮真机续查暴露）**：发 v0.9.28 前用户首索引 50 文件卡「0/50」十分钟，现场查出 desktop 派生 **17 个 `pdftoppm.exe`** 并发——按核数并行提取时，多份扫描 PDF 各 spawn `pdftoppm`（一份一进程、200DPI 整份渲染）+ 逐页 OCR，子进程互抢打爆机器、整体更慢。加 `EXTRACT_PARALLELISM=4` 受限 rayon 线程池（`pool.install`）把重量级提取并发压到 4 路（取 min(4, 核数)）。indexer 194 测试 + clippy/fmt + `cargo check -p locifind-desktop` 全绿。（发 v0.9.28 前已取消不充分的首版构建、重发含两修的 v0.9.28；真机无限 hang 无证据：OCR/pdftoppm 均有超时、坏文件返 Err 已妥处）
@@ -50,11 +54,4 @@
 ### 2026-07-09 — Claude Code (Opus 4.8) — 分派两 CLI 落地 BETA-58/59（MCP 接入体验 + PII 概念检索）
 
 **承接**：用户带 Codex 查身份证文件全程截图，要求 Claude Code 当项目经理、把优化任务分派给本地 Claude CLI 与 Codex CLI 并监督完成，尽量不打扰用户、下版测试时问题都解决。**关键决策**：拆两条**文件不重叠**赛道并行——前端（TS，`apps/desktop`）分本地 Claude 子代理、Rust（`packages/**`）分 Codex CLI（`codex exec --sandbox workspace-write`），两者禁碰 STATUS/ROADMAP 与 git，收工归并由 Claude Code 统一做。**产出**：BETA-58（接入体验）+ BETA-59（PII 概念检索）均 done、并入 main 待发版（详见「当前 Task」+ ROADMAP）；Claude Code 复核双 diff、补 curl 的 PowerShell 提示 + doc_db 注入点权衡注释、跑通 tsc/clippy/test。**未尽事宜**：待推 **v0.9.26**（含 BETA-57/58/59）触发 CI 双平台发布；BETA-59 生效需重建索引；后续可提 `entity` 独立 FTS 列消除 snippet 注入词回显边缘。
-
-### 2026-07-09 — Claude Code (Opus 4.8) — BETA-57 多词查询组间 AND→OR 召回兜底
-
-**承接**：用户经 MCP 查体检材料，报「`体检 体检报告 健康检查 健康体检` 泛查 0 命中、单词能命中」。诊断纠偏：并非我起初判的 `fts_sanitize` 短语化（那条只在无词组的 raw-text 兜底触发、生产不走），真因是 `fts_match_from_groups` **组间 AND**——parser 拆多词组、缺任一词即整条结构性归零。`爱康`(2 字正文词)另属 BETA-56 兜底不扫 body 的已知边界 + 验证 daemon 跑 dummy.gguf 语义臂死，非本次范围。
-**产出（方案 A：AND 优先 + 0 命中 OR 兜底）**：`search_results_expanded`（desktop+MCP 收敛点）AND 空且 ≥2 有效词组时经新 `fts_or_relax_from_groups` 放宽组间 OR 重试一次；零精确性回归（仅空时触发）；抽 `sanitized_group_terms` 消重。local-index +2 测试（单元 + 端到端复现体检报告场景 + AND 命中不受影响对照），29 全绿 / clippy `-D warnings` / fmt 净。查询侧改动**不需重建索引**。
-**收尾（同日续）**：重编 `locifindd`〔release+llama-cpp，4m46s〕+ desktop NSIS〔6m40s〕→ **bump v0.9.25**（tauri.conf/Cargo.toml/lock）→ **真机 MCP 验证达成**：另编 FTS-only stub daemon〔dummy.gguf〕挂体检语料，`健康检查` 单搜 0（缺席）/ 多词 `体检 体检报告 健康检查 健康体检`〔含缺席词、旧 AND 必 0〕经 OR 兜底命中，audit.jsonl 三条 results 佐证。待推 `v0.9.25` tag 触发 CI 发布。分析层（「总结健康状态」）仍是外部 LLM 的活、LociFind 只管检索（范围不变）。
-
 
