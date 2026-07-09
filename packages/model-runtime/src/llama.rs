@@ -101,6 +101,15 @@ pub struct LlamaModelImpl {
     _handle: JoinHandle<()>,
 }
 
+/// worker 线程栈大小。llama.cpp 推理本身是逐层循环、无已知无界递归，但 worker 跑的是
+/// FFI 到 llama.cpp C++ 代码（不在本仓库可审计范围内）——GBNF grammar 递归下降解析、
+/// 未来切换 GPU 后端等都可能引入意外的深栈使用。默认 Rust 线程栈仅约 2MiB，这里加宽
+/// 到 16MiB 做纵深防御，避免重蹈 [`crate`]（参见 packages/indexer 的 pdf-extract 栈
+/// 溢出修复）覆辙：真实 STATUS_STACK_OVERFLOW（0xc00000fd）在 Windows 上无法被
+/// catch_unwind 拦截，唯一防线是给够栈空间。
+#[cfg(feature = "llama-cpp")]
+const LLAMA_WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
+
 #[cfg(feature = "llama-cpp")]
 impl LlamaModelImpl {
     /// 启动 worker 线程并在其中加载模型；阻塞直到加载成功或失败。
@@ -114,16 +123,21 @@ impl LlamaModelImpl {
         let (ready_tx, ready_rx) = channel::<Result<(), ModelError>>();
         let path_buf: PathBuf = path.to_path_buf();
 
-        let handle = std::thread::spawn(move || {
-            worker_main(
-                &backend,
-                &path_buf,
-                gpu_layers,
-                context_size,
-                &ready_tx,
-                &req_rx,
-            );
-        });
+        let handle = std::thread::Builder::new()
+            .stack_size(LLAMA_WORKER_STACK_SIZE)
+            .spawn(move || {
+                worker_main(
+                    &backend,
+                    &path_buf,
+                    gpu_layers,
+                    context_size,
+                    &ready_tx,
+                    &req_rx,
+                );
+            })
+            .map_err(|e| {
+                ModelError::LoadError(format!("Failed to spawn llama worker thread: {e}"))
+            })?;
 
         match ready_rx.recv() {
             Ok(Ok(())) => Ok(Self {
