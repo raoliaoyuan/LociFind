@@ -17,7 +17,10 @@ use crate::model::{DocumentEntry, ExtractedDoc, IndexStats, MusicEntry};
 use crate::progress::{IndexProgress, NoopProgress};
 use crate::IndexError;
 
-const EXTRACT_CHUNK: usize = 128;
+/// 并行提取分块大小。进度 `on_file` 已下沉到并行段逐文件上报（见下），故分块**只用于
+/// 限制内存尖峰**（一次最多驻留一块的正文提取结果），不影响进度粒度；峰值并行度由 rayon
+/// 全局线程池（≈核数）决定、与本值无关。取中等值兼顾内存与串行写库批量。
+const EXTRACT_CHUNK: usize = 64;
 
 /// 增量索引的存储后端抽象（音乐 / 文档各 impl 一份）。
 pub(crate) trait IncrementalStore {
@@ -333,13 +336,22 @@ where
     // 提取器（lofty / pdf-extract / OCR 等）可能很重；并行段只做文件读取/解析，不碰 DB。
     // 按块处理，避免十万级文档把正文提取结果一次性堆到内存里；块内仍使用 rayon 并行。
     for chunk in to_extract.chunks(EXTRACT_CHUNK) {
+        // 并行提取：每个文件一提取完就**立即** on_file 报进度。`IndexProgress` 是 Send+Sync、
+        // 专为跨线程调用设计，故可在 rayon 工作线程里调。这样 UI 计数器随每个文件前进，
+        // 不被整块 rayon barrier 冻住——即便块内有个慢文件（大 PDF / 图片 OCR），其余文件
+        // 仍各自报进度（修 BETA-60 首版把 on_file 放块尾串行段、一块内进度全冻、用户误判卡死）。
         let extracted: Vec<_> = chunk
             .par_iter()
             .map(|candidate| {
-                catch_extract(|| extract(candidate.path.as_path(), candidate.modified_secs))
+                let result =
+                    catch_extract(|| extract(candidate.path.as_path(), candidate.modified_secs));
+                // indexed 语义：提取成功 → 后续必 upsert（true）；提取失败 → 计 failed（false）。
+                progress.on_file(&candidate.path, &candidate.ext, result.is_ok());
+                result
             })
             .collect();
 
+        // 串行写库（DB 单 writer）：仅 upsert / 失败留痕 / stats，进度已在并行段报过、此处不再 on_file。
         for (candidate, result) in chunk.iter().zip(extracted) {
             match result {
                 Ok(e) => {
@@ -350,7 +362,6 @@ where
                     }
                     // 之前失败过、这轮成功 => 清留痕。
                     store.clear_extract_failure(&candidate.path_str)?;
-                    progress.on_file(&candidate.path, &candidate.ext, true);
                 }
                 Err(err) => {
                     stats.failed += 1;
@@ -360,7 +371,6 @@ where
                         other => other.to_string(),
                     };
                     store.record_extract_failure(&candidate.path_str, &reason)?;
-                    progress.on_file(&candidate.path, &candidate.ext, false);
                 }
             }
         }
