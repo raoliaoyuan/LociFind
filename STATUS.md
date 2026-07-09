@@ -6,7 +6,7 @@
 
 ## 📍 速览
 
-- **阶段**：B（Beta）进行中（**v0.9.25 已 bump**——在 v0.9.24〔BETA-56 短 CJK ≤2 字兜底〕上并入 **BETA-57 多词查询 AND→OR 召回兜底**；本机已重编 locifindd + desktop〔release，均 exit 0〕、待推 tag 触发 CI 双平台发布 + 真机验）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
+- **阶段**：B（Beta）进行中（**v0.9.25 已 bump**——在 v0.9.24〔BETA-56 短 CJK ≤2 字兜底〕上并入 **BETA-57 多词查询 AND→OR 召回兜底**；本机已重编 locifindd + desktop〔release，均 exit 0〕、**真机 MCP 验证达成**〔FTS-only daemon 多词泛查含缺席词经 OR 兜底命中、audit 铁证〕、待推 tag 触发 CI 双平台发布）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
 - **当前 task**：**2026-07-08 Codex 接 MCP 排查 → BETA-54/55 + v0.9.23 双平台发布 done**——用户观察「Codex 绕过 MCP 直连库」实为 Codex 从没挂上（Claude 风格 JSON 没进 Codex TOML；配法修好后现稳走 MCP，途中踩 token 轮换 / MSIX 环境变量需注销重登）。真机暴露并修两 gap：**BETA-54 数字检索**（intent-parser 保留 ≥6 位数字串）+ **BETA-55 索引最后保存者**（`cp:lastModifiedBy` 进 author FTS）。三分支（main BETA-54 / origin token 两修 / release）**收敛为单一 main** + **v0.9.23 双平台发布**（CI 修 clippy `manual_range_contains` + fmt 遗留后全绿）。并发会话另修 MCP token 两 bug（已并 main）+ 短 CJK ≤2 字兜底（BETA-56，memory `cjk-short-query-trigram-like-fallback`）。上一里程碑 BETA-53 本机 MCP 服务 done（v0.9.20）。
 - **下一步 top-3**：① **设计伙伴/首个真实部署主动获取**（护城河 P0，ROADMAP §5；BETA-40 真实内网证据/BETA-44 语料扩充均以此为前提）；② **macOS 真机整体待跑**（出场线 Class A 唯一剩项；**v0.9.23 macOS DMG 已产出、具备真机测试前提**；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；③ BETA-53 可选复核：真 Claude Code 进程连 `~/.claude/settings.json` 走一遍（[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）。
@@ -43,7 +43,7 @@
 
 **承接**：用户经 MCP 查体检材料，报「`体检 体检报告 健康检查 健康体检` 泛查 0 命中、单词能命中」。诊断纠偏：并非我起初判的 `fts_sanitize` 短语化（那条只在无词组的 raw-text 兜底触发、生产不走），真因是 `fts_match_from_groups` **组间 AND**——parser 拆多词组、缺任一词即整条结构性归零。`爱康`(2 字正文词)另属 BETA-56 兜底不扫 body 的已知边界 + 验证 daemon 跑 dummy.gguf 语义臂死，非本次范围。
 **产出（方案 A：AND 优先 + 0 命中 OR 兜底）**：`search_results_expanded`（desktop+MCP 收敛点）AND 空且 ≥2 有效词组时经新 `fts_or_relax_from_groups` 放宽组间 OR 重试一次；零精确性回归（仅空时触发）；抽 `sanitized_group_terms` 消重。local-index +2 测试（单元 + 端到端复现体检报告场景 + AND 命中不受影响对照），29 全绿 / clippy `-D warnings` / fmt 净。查询侧改动**不需重建索引**。
-**待办**：locifindd/desktop 重编部署后真机 MCP 验证；随下个发版携带。分析层（「总结健康状态」）仍是外部 LLM 的活、LociFind 只管检索（范围决策不变）。
+**收尾（同日续）**：重编 `locifindd`〔release+llama-cpp，4m46s〕+ desktop NSIS〔6m40s〕→ **bump v0.9.25**（tauri.conf/Cargo.toml/lock）→ **真机 MCP 验证达成**：另编 FTS-only stub daemon〔dummy.gguf〕挂体检语料，`健康检查` 单搜 0（缺席）/ 多词 `体检 体检报告 健康检查 健康体检`〔含缺席词、旧 AND 必 0〕经 OR 兜底命中，audit.jsonl 三条 results 佐证。待推 `v0.9.25` tag 触发 CI 发布。分析层（「总结健康状态」）仍是外部 LLM 的活、LociFind 只管检索（范围不变）。
 
 ### 2026-07-08 — Claude Code (Opus 4.8) — Codex↔MCP 接线 + BETA-54/55 + v0.9.23 双平台发布
 
