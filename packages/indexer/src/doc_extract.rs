@@ -305,6 +305,13 @@ fn extract_spreadsheet(path: &Path) -> Result<Extracted, IndexError> {
 /// 在典型 10 页文档上等价），其他 PDF 一律走原路径不动、保 BETA-27 byte-equal。
 const SCANNED_TEXT_FLOOR_CHARS: usize = 100;
 
+/// pdf-extract 提取专属大栈线程的栈大小。lopdf 对 Pages 树 / Form XObject /
+/// 间接对象引用做**递归解析**，企业卷宗里畸形或深层嵌套的 PDF 会把默认线程栈
+/// （Windows 主线程约 1MB）冲垮，触发 `STATUS_STACK_OVERFLOW`（0xc00000fd）——
+/// 这是进程级 abort，`catch_unwind` 完全兜不住（真机崩溃复盘实锤）。虚拟内存
+/// 按需提交，预留 256MB 地址空间本身几乎不占物理内存。
+const PDF_EXTRACT_STACK_SIZE: usize = 256 * 1024 * 1024;
+
 /// 判定 pdf-extract 抽出的文本是否属于扫描版 PDF（文本层稀薄/为空）。
 ///
 /// 纯函数，便于单测；由 [`extract_pdf`] 与 cycle 3 pipeline 整合后共用。
@@ -319,9 +326,33 @@ fn extract_pdf(path: &Path) -> Result<Extracted, IndexError> {
     // （BETA-40 企业三场景排查实锤：合成中文文本层 PDF 全数因此 panic 未落库）。
     // panic 静默：scan.rs 增量循环的 catch_extract 已装 quiet hook；直接调用方
     // （单测 / 诊断）会看到一条 panic 打印，可接受。
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        pdf_extract::extract_text(path)
-    })) {
+    //
+    // 真机崩溃复盘（0xc00000fd STATUS_STACK_OVERFLOW）：普通 panic 之外，lopdf
+    // 对畸形/深嵌套 PDF 的递归解析会真正冲垮栈——这不是 catch_unwind 能拦住的
+    // panic，而是进程级 abort。改在专属大栈线程里跑提取，把可用栈从默认的
+    // ~1-2MB 提到 PDF_EXTRACT_STACK_SIZE，`join()` 顺带拿到与 catch_unwind 同类型
+    // 的 panic 结果，兜住绝大多数真实世界畸形文档；线程创建本身失败（系统资源
+    // 耗尽等极端情形）才退回原线程执行，行为与升级前一致。
+    let owned_path = path.to_path_buf();
+    let spawned = std::thread::Builder::new()
+        .stack_size(PDF_EXTRACT_STACK_SIZE)
+        .spawn(move || pdf_extract::extract_text(&owned_path));
+
+    let result = match spawned {
+        Ok(handle) => handle.join(),
+        Err(spawn_err) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %spawn_err,
+                "pdf-extract 大栈线程创建失败，退回原线程执行"
+            );
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                pdf_extract::extract_text(path)
+            }))
+        }
+    };
+
+    match result {
         Ok(Ok(body)) => classify_pdf_extraction(path, body),
         Ok(Err(e)) => {
             tracing::warn!(
