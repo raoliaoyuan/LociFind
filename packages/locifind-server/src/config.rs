@@ -24,6 +24,15 @@ use locifind_indexer::{DocumentIndex, MusicIndex};
 use crate::auth::AuthCtx;
 use crate::collections::{CollectionConfig, DaemonConfigFile, LEGACY_COLLECTION_ID};
 
+/// 索引活动探针：由 desktop / daemon 注入，默认 false，避免 server 感知上层状态实现。
+pub type IndexingProbe = Arc<dyn Fn() -> bool + Send + Sync>;
+
+/// 默认空闲探针，保持未注入场景的历史行为。
+#[must_use]
+pub fn idle_indexing_probe() -> IndexingProbe {
+    Arc::new(|| false)
+}
+
 /// 启动参数 — 由 CLI / TOML / env 合并填充。
 #[derive(Debug)]
 pub struct ServerConfig {
@@ -127,6 +136,8 @@ pub struct ServerCtx {
     pub collections: BTreeMap<String, CollectionRuntime>,
     /// 检索留痕 sink（`<data_dir>/audit.jsonl`，BETA-36 验收 ③④）。
     pub audit: Arc<crate::audit::AuditSink>,
+    /// FTS 索引是否正在进行；未注入时恒为 false。
+    pub indexing_probe: IndexingProbe,
 }
 
 impl std::fmt::Debug for ServerCtx {
@@ -136,6 +147,8 @@ impl std::fmt::Debug for ServerCtx {
             .field("embedder_model_id", &self.embedder.model_id())
             .field("collections", &self.collections)
             .field("audit", &self.audit)
+            .field("indexing_probe", &"<probe>")
+            .field("indexing_in_progress", &self.indexing_in_progress())
             .finish()
     }
 }
@@ -211,6 +224,7 @@ impl ServerCtx {
             embedder,
             collections,
             audit,
+            indexing_probe: idle_indexing_probe(),
         })
     }
 
@@ -225,6 +239,12 @@ impl ServerCtx {
     #[must_use]
     pub fn collection(&self, id: &str) -> Option<&CollectionRuntime> {
         self.collections.get(id)
+    }
+
+    /// 当前 FTS 索引是否正在进行。
+    #[must_use]
+    pub fn indexing_in_progress(&self) -> bool {
+        (self.indexing_probe)()
     }
 }
 

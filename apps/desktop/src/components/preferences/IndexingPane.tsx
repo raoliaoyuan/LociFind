@@ -504,6 +504,28 @@ export function IndexingPane({
         <p className="prefs-hint">
           建立音乐 metadata 与文档内容的本地索引；应用启动时会在后台自动索引。
         </p>
+        <label className="prefs-label" htmlFor="auto-index-interval">
+          自动增量索引
+        </label>
+        <p className="prefs-hint">
+          定期检查新增与变动的文件（未变化的文件不会重新索引）。
+        </p>
+        <select
+          id="auto-index-interval"
+          className="prefs-input"
+          value={settings.auto_index_interval_minutes}
+          onChange={(e) =>
+            setSettings({
+              ...settings,
+              auto_index_interval_minutes: Number(e.target.value),
+            })
+          }
+        >
+          <option value={0}>关闭</option>
+          <option value={15}>15 分钟</option>
+          <option value={30}>30 分钟</option>
+          <option value={60}>60 分钟</option>
+        </select>
         {/* BETA-39：图片语义索引 opt-in。默认关（防乱码 OCR 污染语义召回）；
             开启后图片文字走更严的质量门槛（0.75）入语义索引，需重新索引生效。 */}
         <label className="prefs-checkbox">

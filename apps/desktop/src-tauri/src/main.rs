@@ -315,6 +315,99 @@ fn build_synonym_expander(
     (expander, user)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AutoIndexTickDecision {
+    Disabled,
+    RunAfter(std::time::Duration),
+}
+
+/// 自动增量索引调度的纯决策：0 = 关闭；其他值按分钟等待一整轮后执行。
+fn auto_index_tick_decision(interval_minutes: u32) -> AutoIndexTickDecision {
+    if interval_minutes == 0 {
+        AutoIndexTickDecision::Disabled
+    } else {
+        AutoIndexTickDecision::RunAfter(std::time::Duration::from_secs(
+            u64::from(interval_minutes) * 60,
+        ))
+    }
+}
+
+async fn run_auto_index_loop(
+    status: Arc<Mutex<search::IndexStatus>>,
+    embedding: Arc<search::embedding_model::EmbeddingModelHandle>,
+    settings_path: Option<PathBuf>,
+) {
+    loop {
+        let configured_minutes = settings::read_auto_index_interval_minutes(&settings_path);
+        let AutoIndexTickDecision::RunAfter(delay) = auto_index_tick_decision(configured_minutes)
+        else {
+            tracing::debug!("自动增量索引已关闭，60 秒后重读设置");
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            continue;
+        };
+
+        tokio::time::sleep(delay).await;
+
+        // tick 前再读一次，让用户在等待期间关闭自动索引时本轮不执行。
+        let tick_minutes = settings::read_auto_index_interval_minutes(&settings_path);
+        if matches!(
+            auto_index_tick_decision(tick_minutes),
+            AutoIndexTickDecision::Disabled
+        ) {
+            tracing::info!("自动增量索引跳过：设置已关闭");
+            continue;
+        }
+
+        tracing::info!(interval_minutes = tick_minutes, "自动增量索引开始");
+        let reindex_start = std::time::Instant::now();
+        let db = local_index_db_path();
+        let fts_db = db.clone();
+        let fts_status = status.clone();
+        let fts_settings_path = settings_path.clone();
+        match tauri::async_runtime::spawn_blocking(move || {
+            search::perform_reindex(&fts_status, fts_db, fts_settings_path)
+        })
+        .await
+        {
+            Ok(Ok(Some(stats))) => {
+                let elapsed_ms =
+                    u64::try_from(reindex_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                tracing::info!(
+                    elapsed_ms,
+                    music_added = stats.music_added,
+                    music_updated = stats.music_updated,
+                    doc_added = stats.doc_added,
+                    doc_updated = stats.doc_updated,
+                    image_added = stats.image_added,
+                    image_updated = stats.image_updated,
+                    "自动增量索引完成"
+                );
+                search::spawn_semantic_index(
+                    status.clone(),
+                    db,
+                    embedding.clone(),
+                    settings_path.clone(),
+                );
+            }
+            Ok(Ok(None)) => {
+                let elapsed_ms =
+                    u64::try_from(reindex_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                tracing::info!(elapsed_ms, "自动增量索引跳过：已有索引任务正在运行");
+            }
+            Ok(Err(msg)) => {
+                let elapsed_ms =
+                    u64::try_from(reindex_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                warn!(elapsed_ms, error = %msg, "自动增量索引失败");
+            }
+            Err(e) => {
+                let elapsed_ms =
+                    u64::try_from(reindex_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                warn!(elapsed_ms, error = %e, "自动增量索引任务 join 失败");
+            }
+        }
+    }
+}
+
 /// 手动触发本地索引（BETA-04）。BETA-07：经 `perform_reindex` 更新索引状态 + 并发守卫
 /// （已在后台索引中则返回提示）。在阻塞线程跑（SQLite + walkdir + lofty）。
 #[tauri::command]
@@ -588,6 +681,7 @@ fn main() {
                 embedding.clone(),
                 locifind_data_dir(),
                 settings::settings_file_path(&app.handle().clone()),
+                bg_status.clone(),
             ));
             // 上次会话开着 → 本次启动自动拉起（非阻塞，失败仅告警不影响主功能）。
             let mcp_autostart = {
@@ -606,6 +700,14 @@ fn main() {
                     }
                 });
             }
+            let auto_status = bg_status.clone();
+            let auto_embedding = bg_embedding.clone();
+            let auto_settings_path = bg_settings_path.clone();
+            tauri::async_runtime::spawn(run_auto_index_loop(
+                auto_status,
+                auto_embedding,
+                auto_settings_path,
+            ));
             // BETA-07：启动后台自动索引（非阻塞，UI 立即可用）；incremental 后续启动秒级。
             tauri::async_runtime::spawn(async move {
                 info!("启动后台 FTS reindex（spawn_blocking）");
@@ -737,6 +839,19 @@ mod tests {
     #[allow(non_snake_case)]
     fn TRACER_ENV_MUTEX() -> &'static Mutex<()> {
         TRACER_ENV_MUTEX_INNER.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn auto_index_tick_decision_handles_disabled_and_intervals() {
+        assert_eq!(auto_index_tick_decision(0), AutoIndexTickDecision::Disabled);
+        assert_eq!(
+            auto_index_tick_decision(15),
+            AutoIndexTickDecision::RunAfter(std::time::Duration::from_secs(15 * 60))
+        );
+        assert_eq!(
+            auto_index_tick_decision(settings::DEFAULT_AUTO_INDEX_INTERVAL_MINUTES),
+            AutoIndexTickDecision::RunAfter(std::time::Duration::from_secs(30 * 60))
+        );
     }
 
     /// 测试结束时自动 unset LOCIFIND_TRACE + 可选删除 tmpfile,即便 panic 也保证清理。

@@ -5,6 +5,11 @@
 > 后续会话的详录写入 session-details-YYYY-MM.md、溢出摘要滚动追加到本文件。
 
 ---
+### 2026-07-09 — Claude Code (Opus 4.8) — v0.9.28 热修：BETA-60 索引进度回退（误判卡死）
+
+**承接**：用户装 v0.9.27 后，索引中途硬关程序、重开感觉「进度卡死不动」。**现场取证**（Claude Code 直接在用户 Windows 机上 tasklist/sqlite3 只读排查）：装的确是 0.9.27；主库 `%APPDATA%\LociFind\index.db` **完好**——WAL 模式崩溃恢复成功、已 checkpoint 归零、documents=67 + passages=51 在，**我这轮 WAL 改动未致数据丢失**（一度 `sqlite3 -readonly` 读到 0 是没应用 WAL 的旧快照虚惊，WAL-aware `mode=ro` 读到 67）；无 desktop 派生的卡住 OCR 子进程；WAL 时间戳在重开后仍前进＝索引其实在跑。**真因**：BETA-60 Track B 把 `on_file` 放在「128/块并行提取完的块尾串行段」，一块处理期间进度计数器完全不动，块内有慢文件（大 PDF/图 OCR）就冻几十秒→误判卡死。**修①（进度冻结）**：`scan.rs` 把 `on_file` 下沉进并行 `par_iter` map、逐文件提取完即报（`IndexProgress` 本 `Send+Sync` 专为跨线程设计）；串行段不再重复 on_file；`EXTRACT_CHUNK` 128→64。**修②（子进程风暴，同轮真机续查暴露）**：发 v0.9.28 前用户首索引 50 文件卡「0/50」十分钟，现场查出 desktop 派生 **17 个 `pdftoppm.exe`** 并发——按核数并行提取时，多份扫描 PDF 各 spawn `pdftoppm`（一份一进程、200DPI 整份渲染）+ 逐页 OCR，子进程互抢打爆机器、整体更慢。加 `EXTRACT_PARALLELISM=4` 受限 rayon 线程池（`pool.install`）把重量级提取并发压到 4 路（取 min(4, 核数)）。indexer 194 测试 + clippy/fmt + `cargo check -p locifind-desktop` 全绿。（发 v0.9.28 前已取消不充分的首版构建、重发含两修的 v0.9.28；真机无限 hang 无证据：OCR/pdftoppm 均有超时、坏文件返 Err 已妥处）
+
+---
 ### 2026-07-09 — Claude Code (Opus 4.8) — BETA-59 独立 `entity` 列重构（PII 类型词与展示正文隔离）
 
 **承接**：BETA-59 首版 PII 类型词并入 `documents_fts.body`，遗留「正文无字面标签、仅命中注入词时 `snippet()` 回显关键词尾巴」的出处观感缺陷（非隐私/正确性）。**产出**：`documents_fts` 加末列 `entity`（列序 title=0/author=1/body=2/entity=3 不变），类型词改写 `entity`——`query` 裸 `MATCH` 自动跨列命中，`snippet()`/`preview` 固定 body 列**永不回显** entity；`pii.rs` `append_pii_keywords_for_fts`→`pii_entity_keywords`。**迁移不 bump schema**：`migrate_documents_fts_entity` 就地**拷 body 进新 4 列表再 drop+rename**（body 是正文唯一存处、不能仿 `migrate_music_fts` 从主表重建；entity 灌空待增量回填），升级无运行时崩（4 列 INSERT 只在迁移后跑）、老正文照常可搜，与既有两处"透明加列"同套路；bump 版本逼全库重建代价不划算故舍。indexer 195/197 + server 93 全绿、clippy `-D warnings`/fmt 净（+entity 命中/snippet 不回显/3 列老库迁移保 body 三测）。已 rebase 到 v0.9.29、与 BETA-60 WAL/分块提取同文件融合；**PR [#6](https://github.com/raoliaoyuan/LociFind/pull/6)**。

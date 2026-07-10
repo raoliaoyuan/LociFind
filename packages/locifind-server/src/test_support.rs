@@ -32,7 +32,8 @@ use crate::collections::{
     CollectionConfig, CollectionGrant, DaemonConfigFile, SubjectKind, TokenConfig,
 };
 use crate::config::{
-    collection_db_path, CollectionRuntime, CollectionState, ServerConfig, ServerCtx,
+    collection_db_path, idle_indexing_probe, CollectionRuntime, CollectionState, IndexingProbe,
+    ServerConfig, ServerCtx,
 };
 use crate::tools::search::build_local_search_candidates;
 
@@ -178,6 +179,12 @@ fn test_server_config(
 ///   `LocalIndexBackend` 见 `db_path` 不存在即返空结果（非错误）。
 #[must_use]
 pub fn build_test_ctx_inmem() -> Arc<ServerCtx> {
+    build_test_ctx_inmem_with_indexing_probe(idle_indexing_probe())
+}
+
+/// 构造单 collection 内存 ctx，并允许测试注入索引活动探针。
+#[must_use]
+pub fn build_test_ctx_inmem_with_indexing_probe(indexing_probe: IndexingProbe) -> Arc<ServerCtx> {
     let (data_dir, root, model_path) = unique_temp_paths();
     let access =
         DaemonConfigFile::legacy_single_root(root, SecretString::from("test-token".to_owned()));
@@ -194,6 +201,7 @@ pub fn build_test_ctx_inmem() -> Arc<ServerCtx> {
         embedder: Arc::new(StubEmbedder::default()),
         collections,
         audit,
+        indexing_probe,
     })
 }
 
@@ -228,6 +236,7 @@ pub fn build_test_ctx_multi_inmem() -> Arc<ServerCtx> {
         embedder: Arc::new(StubEmbedder::default()),
         collections,
         audit,
+        indexing_probe: idle_indexing_probe(),
     })
 }
 
@@ -305,6 +314,7 @@ pub fn build_test_ctx_indexed(
         embedder: Arc::new(StubEmbedder::default()),
         collections,
         audit,
+        indexing_probe: idle_indexing_probe(),
     })
 }
 

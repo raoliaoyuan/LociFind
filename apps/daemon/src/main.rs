@@ -40,7 +40,7 @@ use locifind_model_runtime::{ModelDaemon, ModelLoadParams};
 use locifind_server::app::build_app;
 use locifind_server::collections::{parse_config_toml, DaemonConfigFile};
 use locifind_server::config::{
-    collection_db_path, CollectionRuntime, CollectionState, ServerConfig,
+    collection_db_path, CollectionRuntime, CollectionState, IndexingProbe, ServerConfig,
 };
 use locifind_server::ServerCtx;
 
@@ -270,11 +270,17 @@ async fn build_runtime_ctx(config: ServerConfig) -> Result<ServerCtx> {
         config.access.audit.log_query,
     ));
 
+    let indexing_probe: IndexingProbe = {
+        let states: Vec<_> = collections.values().map(|rt| rt.state.clone()).collect();
+        Arc::new(move || states.iter().any(|state| state.read().reindex_in_flight))
+    };
+
     Ok(ServerCtx {
         config,
         embedder,
         collections,
         audit,
+        indexing_probe,
     })
 }
 

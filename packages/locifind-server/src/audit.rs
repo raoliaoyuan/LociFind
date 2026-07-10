@@ -63,6 +63,9 @@ pub struct AuditRecord {
     /// 读取模式：`full`（全文）或 `snippets`（命中片段，禁全文集合唯一模式）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_mode: Option<String>,
+    /// 检索时 FTS 索引是否仍在构建中；仅 true 时落盘，保持旧记录形状不变。
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub indexing_in_progress: bool,
 }
 
 impl AuditRecord {
@@ -80,6 +83,7 @@ impl AuditRecord {
             denied_reason: None,
             path: None,
             read_mode: None,
+            indexing_in_progress: false,
         }
     }
 
@@ -119,6 +123,13 @@ impl AuditRecord {
     #[must_use]
     pub fn with_read_mode(mut self, mode: &str) -> Self {
         self.read_mode = Some(mode.to_string());
+        self
+    }
+
+    /// 标记检索发生时索引仍在构建中，便于事后诊断空结果是否因索引未完成。
+    #[must_use]
+    pub fn with_indexing_in_progress(mut self, indexing_in_progress: bool) -> Self {
+        self.indexing_in_progress = indexing_in_progress;
         self
     }
 }

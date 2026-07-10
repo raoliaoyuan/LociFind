@@ -31,6 +31,7 @@ use locifind_server::collections::{DaemonConfigFile, LEGACY_COLLECTION_ID};
 use locifind_server::config::ServerConfig;
 use locifind_server::ServerCtx;
 
+use crate::search::IndexStatus;
 use crate::settings::AppSettings;
 
 /// 固定监听端口（设计 §7 拍板 **8766**，避开 daemon 惯用 8765；端口自定义留 v2）。
@@ -56,9 +57,7 @@ async fn bind_with_retry(addr: SocketAddr) -> std::io::Result<TcpListener> {
     loop {
         match TcpListener::bind(addr).await {
             Ok(listener) => return Ok(listener),
-            Err(e)
-                if e.kind() == std::io::ErrorKind::AddrInUse && attempt < BIND_MAX_RETRIES =>
-            {
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && attempt < BIND_MAX_RETRIES => {
                 attempt += 1;
                 warn!(%addr, attempt, "MCP 端口被占用，等待旧监听释放后重试");
                 tokio::time::sleep(BIND_RETRY_DELAY).await;
@@ -88,6 +87,8 @@ pub struct McpServiceState {
     data_dir: PathBuf,
     /// settings.json 路径（读写开关态 + token；读生效 roots / semantic_weight）。
     settings_path: Option<PathBuf>,
+    /// 桌面 FTS 索引状态，供 MCP search 给出“结果可能不完整”提示。
+    indexing_status: Arc<std::sync::Mutex<IndexStatus>>,
     /// 当前运行态（`None` = 已停）。
     running: Mutex<Option<RunningService>>,
 }
@@ -143,11 +144,13 @@ impl McpServiceState {
         embedder: Arc<dyn TextEmbedder>,
         data_dir: PathBuf,
         settings_path: Option<PathBuf>,
+        indexing_status: Arc<std::sync::Mutex<IndexStatus>>,
     ) -> Self {
         Self {
             embedder,
             data_dir,
             settings_path,
+            indexing_status,
             running: Mutex::new(None),
         }
     }
@@ -214,7 +217,7 @@ impl McpServiceState {
         let embed_images = settings.enable_image_semantics;
         let token_secret = SecretString::from(token.clone());
 
-        let (ctx, semantic) =
+        let (mut ctx, semantic) =
             tauri::async_runtime::spawn_blocking(move || -> Result<(ServerCtx, bool), String> {
                 // 语义臂探针：与 attach_readonly 内部同口径（stub / 模型缺失 → FTS-only）。
                 let semantic = embedder.embed("ping").is_ok();
@@ -235,6 +238,14 @@ impl McpServiceState {
             })
             .await
             .map_err(|e| format!("构建本机 MCP 服务上下文任务失败: {e}"))??;
+
+        let indexing_status = Arc::clone(&self.indexing_status);
+        ctx.indexing_probe = Arc::new(move || {
+            indexing_status
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .indexing
+        });
 
         let ctx = Arc::new(ctx);
         let doc_count = ctx
@@ -420,6 +431,7 @@ mod tests {
             )),
             PathBuf::from("/tmp/data"),
             Some(settings_path.clone()),
+            Arc::new(std::sync::Mutex::new(IndexStatus::default())),
         );
 
         // 模拟 auto-start / start() 的持久化：置 enabled + token 落盘（与 start 走同一 persist）。
@@ -450,6 +462,7 @@ mod tests {
             )),
             PathBuf::from("/tmp/data"),
             None,
+            Arc::new(std::sync::Mutex::new(IndexStatus::default())),
         );
         let mut settings = AppSettings::default();
         settings.mcp_service_token = Some("t".repeat(64));
@@ -479,6 +492,7 @@ mod tests {
             )),
             PathBuf::from("/tmp/data"),
             Some(f.clone()),
+            Arc::new(std::sync::Mutex::new(IndexStatus::default())),
         );
 
         let st = state.reset_token().await.unwrap();

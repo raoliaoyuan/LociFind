@@ -34,6 +34,9 @@ pub struct AppSettings {
     /// JSON object key 用路径字符串会让 Windows 盘符/反斜杠/大小写/尾部分隔符更脆，
     /// 且未来加 enabled/comment/created_at 难扩展。
     pub root_excludes: Vec<RootExclude>,
+    /// App 运行期间自动增量索引间隔（分钟）。0 = 关闭；缺省 30。
+    /// 每轮调度前 live-read，用户改设置后无需重启。
+    pub auto_index_interval_minutes: u32,
     /// BETA-15B-3 A-2：融合层语义臂权重覆盖（None = 默认 DEFAULT_SEMANTIC_WEIGHT）。
     /// clamp[0.5, 50.0]：下限防 FTS 倒挂、上限防无意义大值。
     pub semantic_weight: Option<f64>,
@@ -88,6 +91,7 @@ impl Default for AppSettings {
             include_system_defaults: false,
             exclude_globs: Vec::new(),
             root_excludes: Vec::new(),
+            auto_index_interval_minutes: DEFAULT_AUTO_INDEX_INTERVAL_MINUTES,
             semantic_weight: None,
             enable_image_semantics: false,
             enable_everything: true,
@@ -213,6 +217,7 @@ pub(crate) fn resolve_exclude_globs(raw: &[String]) -> Vec<String> {
 
 /// 语义相似度下限默认值（全仓单一默认源）。
 pub(crate) const DEFAULT_SIMILARITY_FLOOR: f32 = 0.30;
+pub(crate) const DEFAULT_AUTO_INDEX_INTERVAL_MINUTES: u32 = 30;
 
 /// 把设置里的原始下限值规整：有限值 clamp 到 [0,1]；None / 非有限 → 默认。
 pub(crate) fn resolve_similarity_floor(raw: Option<f32>) -> f32 {
@@ -272,6 +277,18 @@ pub(crate) fn read_enable_everything(settings_path: &Option<std::path::PathBuf>)
         // 注：不用 `is_none_or`（1.82 稳定）——crate 声明 rust-version 1.80，
         // clippy `incompatible_msrv` 会拦。
         .map_or(true, |v| v.enable_everything)
+}
+
+/// 从 settings.json live-read 自动增量索引间隔。读取失败或旧配置缺字段时回退默认 30 分钟；
+/// 显式 0 表示关闭自动索引。
+pub(crate) fn read_auto_index_interval_minutes(settings_path: &Option<std::path::PathBuf>) -> u32 {
+    settings_path
+        .as_ref()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<AppSettings>(&s).ok())
+        .map_or(DEFAULT_AUTO_INDEX_INTERVAL_MINUTES, |v| {
+            v.auto_index_interval_minutes
+        })
 }
 
 /// BETA-53：best-effort 读取完整 `AppSettings`（`settings_path` 指向 settings.json）。
@@ -575,6 +592,39 @@ mod tests {
         // 配置损坏 → true（不因坏文件静默关加速）。
         std::fs::write(&f, "not json").unwrap();
         assert!(read_enable_everything(&Some(f)));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn auto_index_interval_defaults_and_reads_ok() {
+        assert_eq!(
+            AppSettings::default().auto_index_interval_minutes,
+            DEFAULT_AUTO_INDEX_INTERVAL_MINUTES
+        );
+        let json = r#"{"global_shortcut":"Ctrl+Space"}"#;
+        let s: AppSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            s.auto_index_interval_minutes, DEFAULT_AUTO_INDEX_INTERVAL_MINUTES,
+            "旧 settings.json 缺字段时应回退默认间隔"
+        );
+
+        assert_eq!(
+            read_auto_index_interval_minutes(&None),
+            DEFAULT_AUTO_INDEX_INTERVAL_MINUTES
+        );
+        let dir = std::env::temp_dir().join(format!("locifind-auto-index-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("settings.json");
+        std::fs::write(&f, r#"{"auto_index_interval_minutes":0}"#).unwrap();
+        assert_eq!(read_auto_index_interval_minutes(&Some(f.clone())), 0);
+        std::fs::write(&f, r#"{"auto_index_interval_minutes":15}"#).unwrap();
+        assert_eq!(read_auto_index_interval_minutes(&Some(f.clone())), 15);
+        std::fs::write(&f, r#"{"auto_index_interval_minutes":-1}"#).unwrap();
+        assert_eq!(
+            read_auto_index_interval_minutes(&Some(f)),
+            DEFAULT_AUTO_INDEX_INTERVAL_MINUTES,
+            "非法 JSON 值导致反序列化失败时回退默认"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

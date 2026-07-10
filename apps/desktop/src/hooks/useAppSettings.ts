@@ -39,6 +39,8 @@ export interface AppSettings {
   exclude_globs: string[];
   /** cycle 7-b：per-root 子路径排除（相对 root 的 path glob）。 */
   root_excludes: RootExclude[];
+  /** 运行期自动增量索引间隔（分钟）。0 = 关闭。 */
+  auto_index_interval_minutes: number;
 }
 
 /**

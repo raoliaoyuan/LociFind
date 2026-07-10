@@ -47,6 +47,7 @@ use crate::config::ServerCtx;
 pub const HARD_LIMIT_CAP: usize = 50;
 /// `limit` 缺省值。
 pub const DEFAULT_LIMIT: usize = 20;
+const INDEXING_IN_PROGRESS_NOTE: &str = "本地索引正在构建中，结果可能不完整，建议稍后重试。";
 /// daemon 语义臂相似度下限（镜像 desktop `DEFAULT_SIMILARITY_FLOOR`；daemon 无
 /// settings.json，用编译期常量。低于此 cosine 的候选在融合前过滤）。
 pub const DAEMON_SIMILARITY_FLOOR: f32 = 0.30;
@@ -89,11 +90,28 @@ struct SearchOutput {
     results: Vec<SearchHit>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     degraded: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    indexing_in_progress: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<&'static str>,
 }
 
 /// `search` tool —— 自然语言查询包装。
 #[derive(Debug)]
 pub struct SearchTool;
+
+fn search_output(
+    results: Vec<SearchHit>,
+    degraded: bool,
+    indexing_in_progress: bool,
+) -> SearchOutput {
+    SearchOutput {
+        results,
+        degraded,
+        indexing_in_progress,
+        note: indexing_in_progress.then_some(INDEXING_IN_PROGRESS_NOTE),
+    }
+}
 
 /// 解析目标 collection：显式请求逐个校验授权与存在性（两种失败同文案，防探测）；
 /// 缺省 = principal 授权且已声明的全部。
@@ -232,10 +250,7 @@ impl Tool for SearchTool {
                 intent_variant = ?std::mem::discriminant(&intent),
                 "search short-circuited: intent variant not supported in daemon"
             );
-            let output = SearchOutput {
-                results: Vec::new(),
-                degraded: false,
-            };
+            let output = search_output(Vec::new(), false, ctx.indexing_in_progress());
             return serde_json::to_value(output).map_err(|e| ToolError::Internal(e.to_string()));
         }
 
@@ -360,16 +375,15 @@ impl Tool for SearchTool {
         }
 
         // 检索留痕（验收 ③：subject + collections + query + 命中数）。
+        let indexing_in_progress = ctx.indexing_in_progress();
         ctx.audit.record(
             &AuditRecord::now(&principal.subject, AuditAction::Search, target_ids.clone())
                 .with_query(&input.query, ctx.audit.log_query)
-                .with_results(hits.len()),
+                .with_results(hits.len())
+                .with_indexing_in_progress(indexing_in_progress),
         );
 
-        let output = SearchOutput {
-            results: hits,
-            degraded,
-        };
+        let output = search_output(hits, degraded, indexing_in_progress);
         serde_json::to_value(output).map_err(|e| ToolError::Internal(e.to_string()))
     }
 }
@@ -504,8 +518,8 @@ mod tests {
 
     use super::*;
     use crate::test_support::{
-        build_test_ctx_inmem, build_test_ctx_multi_inmem, full_access_principal,
-        restricted_principal,
+        build_test_ctx_inmem, build_test_ctx_inmem_with_indexing_probe, build_test_ctx_multi_inmem,
+        full_access_principal, restricted_principal,
     };
     use locifind_search_backend::{FileSearch, SchemaVersion};
 
@@ -577,6 +591,36 @@ mod tests {
         assert!(arr.is_empty(), "空 db 应返空 results");
         // db 不存在 → 无集合被 serve → degraded=true。
         assert_eq!(v["degraded"], json!(true));
+        assert!(
+            v.get("indexing_in_progress").is_none(),
+            "default probe must not emit indexing_in_progress"
+        );
+        assert!(v.get("note").is_none(), "default probe must not emit note");
+    }
+
+    #[test]
+    fn idle_indexing_output_keeps_legacy_json_bytes() {
+        let ok_json = serde_json::to_string(&search_output(Vec::new(), false, false)).unwrap();
+        assert_eq!(
+            ok_json, r#"{"results":[]}"#,
+            "idle non-degraded output must stay byte-identical"
+        );
+        let degraded_json = serde_json::to_string(&search_output(Vec::new(), true, false)).unwrap();
+        assert_eq!(
+            degraded_json, r#"{"results":[],"degraded":true}"#,
+            "idle degraded output must stay byte-identical"
+        );
+    }
+
+    #[tokio::test]
+    async fn indexing_in_progress_adds_structured_hint_and_note() {
+        let ctx = build_test_ctx_inmem_with_indexing_probe(Arc::new(|| true));
+        let v = SearchTool
+            .invoke(json!({"query": "anything"}), ctx, full_access_principal())
+            .await
+            .unwrap();
+        assert_eq!(v["indexing_in_progress"], json!(true));
+        assert_eq!(v["note"], json!(INDEXING_IN_PROGRESS_NOTE));
     }
 
     // ===== BETA-36：collection 授权 =====
