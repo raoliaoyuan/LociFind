@@ -71,7 +71,7 @@ fn beta41_text_layer_pdf_takes_original_path() {
     assert!(
         doc.body.contains("Northridge"),
         "文本层正文应含合成关键词，实得: {}",
-        &doc.body.chars().take(120).collect::<String>()
+        doc.body.chars().take(120).collect::<String>()
     );
     assert!(doc.body.chars().count() >= 100, "文本层不应被判为扫描版");
     assert!(doc.passages.is_empty(), "原路径 passages 应为空");
