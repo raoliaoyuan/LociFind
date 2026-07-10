@@ -1,6 +1,6 @@
 [package]
 name = "locifind-desktop"
-version = "0.9.30"
+version = "0.9.31"
 description = "LociFind Desktop App"
 authors = ["LociFind Project"]
 edition = "2021"
