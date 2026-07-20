@@ -11,9 +11,9 @@ use locifind_platform_macos::MacOsLocationResolver;
 use locifind_search_backend::{
     backend_stream_from_results, intent_sort_order, relative_time_bounds, sort_results,
     BackendKind, BackendSearchFuture, CancellationToken, CommonConstraints, ExpandedSearchIntent,
-    FileSearch, FileType, KeywordGroup, LocationResolver, MatchType, MediaSearch, MediaType,
-    Quality, SearchBackend, SearchError, SearchIntent, SearchResult, SearchResultMetadata,
-    SizeExpression, SizeUnit, SortOrder, TimeExpression,
+    FileSearch, FileType, KeywordGroup, LocationResolver, MatchMode, MatchType, MediaSearch,
+    MediaType, Quality, SearchBackend, SearchError, SearchIntent, SearchResult,
+    SearchResultMetadata, SizeExpression, SizeUnit, SortOrder, TimeExpression,
 };
 // 跨后端共用的小工具收拢在 common，后端按原名别名引入，调用点零改动。
 use locifind_search_backend::{
@@ -178,12 +178,20 @@ where
     }
 
     match &expanded.base {
-        SearchIntent::FileSearch(search) => {
-            translate_file_search_expanded(search, &expanded.keyword_groups, resolver)
-        }
+        SearchIntent::FileSearch(search) => translate_file_search_expanded(
+            search,
+            &expanded.keyword_groups,
+            expanded.match_mode,
+            resolver,
+        ),
         SearchIntent::MediaSearch(search) => {
             // MediaSearch 的同义词扩展：复用 media 翻译，仅替换 keyword 谓词部分
-            translate_media_search_expanded(search, &expanded.keyword_groups, resolver)
+            translate_media_search_expanded(
+                search,
+                &expanded.keyword_groups,
+                expanded.match_mode,
+                resolver,
+            )
         }
         SearchIntent::Refine(_) | SearchIntent::FileAction(_) | SearchIntent::Clarify(_) => {
             Err(SearchError::UnsupportedIntent {
@@ -197,6 +205,7 @@ where
 fn translate_file_search_expanded<R>(
     search: &FileSearch,
     groups: &[KeywordGroup],
+    match_mode: MatchMode,
     resolver: &R,
 ) -> Result<TranslatedQuery, SearchError>
 where
@@ -204,10 +213,7 @@ where
 {
     let mut builder = QueryBuilder::new(search.limit);
     // 用扩展后的 keyword 组替代原始 keyword 列表
-    for group in groups.iter().filter(|g| !g.head.is_empty()) {
-        builder.and_cmp(name_glob_predicate_expanded(group));
-        builder.and_str(content_predicate_expanded(group));
-    }
+    add_keyword_groups_to_builder(&mut builder, groups, match_mode);
     add_common_file_constraints(
         &mut builder,
         resolver,
@@ -230,6 +236,7 @@ where
 fn translate_media_search_expanded<R>(
     search: &MediaSearch,
     groups: &[KeywordGroup],
+    match_mode: MatchMode,
     resolver: &R,
 ) -> Result<TranslatedQuery, SearchError>
 where
@@ -248,10 +255,7 @@ where
         .or_else(|| media_file_type.map(|ft| vec![ft]));
 
     // 用扩展后的 keyword 组替代原始 keyword 列表
-    for group in groups.iter().filter(|g| !g.head.is_empty()) {
-        builder.and_cmp(name_glob_predicate_expanded(group));
-        builder.and_str(content_predicate_expanded(group));
-    }
+    add_keyword_groups_to_builder(&mut builder, groups, match_mode);
     add_common_file_constraints(
         &mut builder,
         resolver,
@@ -645,6 +649,45 @@ fn content_predicate_expanded(group: &KeywordGroup) -> String {
         })
         .collect();
     format!("({})", parts.join(" || "))
+}
+
+/// 把 `groups` 的 Q1（文件名 glob）与 Q2（内容 CONTAINS）谓词分别合并成**单个**组合谓词
+/// 推给 builder，组间连接符按全局 `match_mode` 取 `&&`（[`MatchMode::All`]，全部复合条件
+/// 命中）或 `||`（[`MatchMode::Any`]，任一条件命中）。必须合并成单个谓词再推——`QueryBuilder`
+/// 的 `cmp_predicates`/`str_predicates` 列表混装了扩展名/时间/大小/路径等其余约束，
+/// `finish()` 对整个列表恒以 `&&` 连接；若逐组分别 push，组间语义就没法脱离「与其余约束
+/// 一起 AND」，无法表达「任一关键词组命中即可，但其余约束仍必须满足」。
+fn add_keyword_groups_to_builder(
+    builder: &mut QueryBuilder,
+    groups: &[KeywordGroup],
+    match_mode: MatchMode,
+) {
+    let joiner = match match_mode {
+        MatchMode::All => " && ",
+        MatchMode::Any => " || ",
+    };
+    let mut cmp_parts = Vec::new();
+    let mut str_parts = Vec::new();
+    for group in groups.iter().filter(|g| !g.head.is_empty()) {
+        cmp_parts.push(name_glob_predicate_expanded(group));
+        str_parts.push(content_predicate_expanded(group));
+    }
+    if let Some(combined) = combine_predicates(cmp_parts, joiner) {
+        builder.and_cmp(combined);
+    }
+    if let Some(combined) = combine_predicates(str_parts, joiner) {
+        builder.and_str(combined);
+    }
+}
+
+/// 把多个谓词字符串合并成一个：0 个 → `None`；1 个 → 原样返回（不加括号，与旧行为
+/// byte-equal）；≥2 个 → 括号包裹后按 `joiner` 连接。
+fn combine_predicates(parts: Vec<String>, joiner: &str) -> Option<String> {
+    match parts.len() {
+        0 => None,
+        1 => parts.into_iter().next(),
+        _ => Some(format!("({})", parts.join(joiner))),
+    }
 }
 
 fn extension_predicate<S>(extensions: &[S], negate: bool) -> String
@@ -1506,6 +1549,58 @@ mod tests {
         assert!(!content_pred.contains("\" || (1==1) || \""));
         let name_pred = name_glob_predicate_expanded(&g);
         assert!(name_pred.contains("\\\""));
+    }
+
+    /// 2026-07-20：全局 `MatchMode` 控制多个 keyword 组之间的连接词——`All`（默认）组间
+    /// `&&`，`Any` 组间 `||`，对 Q1（文件名）与 Q2（内容）两条谓词都生效。
+    #[test]
+    fn add_keyword_groups_to_builder_joins_by_match_mode() {
+        let groups = vec![
+            KeywordGroup::singleton("工作汇报"),
+            KeywordGroup::singleton("季度"),
+        ];
+
+        let mut builder_all = QueryBuilder::new(None);
+        add_keyword_groups_to_builder(&mut builder_all, &groups, MatchMode::All);
+        let translated_all = builder_all.finish();
+        // Q1（文件名）每个词组自身已带括号（跨 FSName/DisplayName OR），组间连接看得到 ") && ("。
+        assert!(
+            translated_all.q1.predicate.contains(") && ("),
+            "All 模式 Q1 组间应为 &&: {}",
+            translated_all.q1.predicate
+        );
+        // Q2（内容）singleton 组谓词本身不带括号，只需确认外层用 && 连接两词组、且不含 ||。
+        let content_all = translated_all.q2.expect("应有 Q2").predicate;
+        assert!(
+            content_all.contains("工作汇报")
+                && content_all.contains("季度")
+                && content_all.contains(" && "),
+            "All 模式 Q2 组间应为 &&: {content_all}"
+        );
+        assert!(
+            !content_all.contains(" || "),
+            "All 模式 Q2 不应含 ||: {content_all}"
+        );
+
+        let mut builder_any = QueryBuilder::new(None);
+        add_keyword_groups_to_builder(&mut builder_any, &groups, MatchMode::Any);
+        let translated_any = builder_any.finish();
+        assert!(
+            translated_any.q1.predicate.contains(") || ("),
+            "Any 模式 Q1 组间应为 ||: {}",
+            translated_any.q1.predicate
+        );
+        let content_any = translated_any.q2.expect("应有 Q2").predicate;
+        assert!(
+            content_any.contains("工作汇报")
+                && content_any.contains("季度")
+                && content_any.contains(" || "),
+            "Any 模式 Q2 组间应为 ||: {content_any}"
+        );
+        assert!(
+            !content_any.contains(" && "),
+            "Any 模式 Q2 不应含 &&: {content_any}"
+        );
     }
 
     #[cfg(unix)]

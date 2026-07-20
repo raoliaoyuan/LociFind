@@ -605,6 +605,17 @@ fn main() {
                 std::sync::Arc::new(move || {
                     settings::read_enable_image_semantics(&img_settings_path)
                 })
+            })
+            // 2026-07-20：注入复合条件匹配模式 provider（live-read，search_impl/预览高亮共用）。
+            .with_match_mode_provider({
+                let match_mode_settings_path = settings::settings_file_path(&app.handle().clone());
+                std::sync::Arc::new(move || {
+                    if settings::read_search_match_all_conditions(&match_mode_settings_path) {
+                        locifind_search_backend::MatchMode::All
+                    } else {
+                        locifind_search_backend::MatchMode::Any
+                    }
+                })
             });
             // BETA-25：dev 构建窗口标题加后缀，避免与安装版（同名同 bundle id）在手测时混淆。
             #[cfg(debug_assertions)]

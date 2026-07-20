@@ -56,6 +56,10 @@ pub struct ServerConfig {
     /// 桌面端维持 opt-in 默认关，两侧策略独立。CLI `--disable-image-semantics`
     /// 关闭；启动期 purge 按本开关镜像桌面语义（关 → 清全部图片向量）。
     pub embed_images: bool,
+    /// 2026-07-20：多个复合检索条件（关键词组）之间的匹配模式，daemon 无 settings.json、
+    /// 由 CLI `--match-any-condition` 一次性注入（默认 `MatchMode::All`，严格全部命中，
+    /// 与桌面端默认口径一致；取代 BETA-57 旧版自动 OR 兜底）。四个检索后端统一读取。
+    pub match_mode: locifind_search_backend::MatchMode,
     /// 已校验的 collections / tokens / audit 配置（TOML 解析或 legacy 合成）。
     pub access: DaemonConfigFile,
 }
@@ -307,6 +311,7 @@ mod tests {
             log_level: LevelFilter::WARN,
             semantic_weight: locifind_result_normalizer::DEFAULT_SEMANTIC_WEIGHT,
             embed_images: true,
+            match_mode: locifind_search_backend::MatchMode::All,
             access,
         };
 

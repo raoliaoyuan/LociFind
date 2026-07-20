@@ -20,6 +20,7 @@ path = "src/main.rs"
 locifind-server = { path = "../../packages/locifind-server" }
 locifind-indexer = { path = "../../packages/indexer" }
 locifind-model-runtime = { path = "../../packages/model-runtime" }
+locifind-search-backend = { path = "../../packages/search-backends/common" }
 
 # Async runtime（daemon 需要 multi-thread + signal + time）
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }

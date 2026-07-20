@@ -203,7 +203,8 @@ fn fts_for_query(query: &str, deps: &SearchDeps) -> Option<String> {
     }
     let resolved = resolve_intent(q, None).ok()?;
     let expanded = deps.synonym_expander().expand(resolved.intent, q);
-    fts_match_for_groups(&expanded.keyword_groups)
+    // 与 search_impl 同口径：读同一份全局 match_mode 配置，保证高亮与实际搜索命中一致。
+    fts_match_for_groups(&expanded.keyword_groups, deps.match_mode())
 }
 
 /// 候选查询路径：原值 + 去除 Windows 扩展长度前缀（`\\?\` / `\\?\UNC\`）的形式。

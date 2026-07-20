@@ -3406,7 +3406,7 @@ dependencies = [
 
 [[package]]
 name = "locifind-desktop"
-version = "0.9.31"
+version = "0.9.32"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -3684,6 +3684,7 @@ dependencies = [
  "clap",
  "locifind-indexer",
  "locifind-model-runtime",
+ "locifind-search-backend",
  "locifind-server",
  "parking_lot",
  "reqwest 0.12.28",

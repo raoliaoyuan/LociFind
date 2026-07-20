@@ -496,6 +496,7 @@ pub(crate) fn expand_with_view(
     ExpandedSearchIntent {
         base: intent,
         keyword_groups: groups,
+        match_mode: locifind_search_backend::MatchMode::default(),
     }
 }
 

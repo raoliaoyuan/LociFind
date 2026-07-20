@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use locifind_indexer::{DocumentIndex, DocumentQuery, MusicIndex, MusicQuery};
 use locifind_local_index_backend::{fts_match_for_groups, LocalIndexBackend, LocalPreview};
-use locifind_search_backend::KeywordGroup;
+use locifind_search_backend::{KeywordGroup, MatchMode};
 
 /// 真实索引库路径：`data_dir()/LociFind/index.db`（Windows = `%APPDATA%/LociFind`）。
 fn real_db_path() -> Option<PathBuf> {
@@ -67,7 +67,7 @@ fn preview_real_document_returns_body_and_highlight() {
         if d.body.chars().count() >= 3 {
             // 用正文前几个字符构造命中表达式，验证 snippet 高亮哨兵注入。
             let needle: String = d.body.chars().take(3).collect();
-            let fts = fts_match_for_groups(&[KeywordGroup::singleton(&needle)]);
+            let fts = fts_match_for_groups(&[KeywordGroup::singleton(&needle)], MatchMode::All);
             let hl = backend.preview(path, fts.as_deref()).unwrap();
             if let Some(LocalPreview::Document(d2)) = hl {
                 if let Some(snip) = d2.snippet {

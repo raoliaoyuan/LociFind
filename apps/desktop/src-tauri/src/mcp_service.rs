@@ -215,6 +215,7 @@ impl McpServiceState {
         let roots = effective_roots(&settings);
         let semantic_weight = crate::settings::resolve_semantic_weight(settings.semantic_weight);
         let embed_images = settings.enable_image_semantics;
+        let match_all_conditions = settings.search_match_all_conditions;
         let token_secret = SecretString::from(token.clone());
 
         let (mut ctx, semantic) =
@@ -230,6 +231,13 @@ impl McpServiceState {
                     log_level: LevelFilter::WARN,
                     semantic_weight,
                     embed_images,
+                    // 2026-07-20：与桌面 search_impl 同口径读同一份全局设置，MCP 检索的复合
+                    // 条件匹配行为与桌面内搜索一致。
+                    match_mode: if match_all_conditions {
+                        locifind_search_backend::MatchMode::All
+                    } else {
+                        locifind_search_backend::MatchMode::Any
+                    },
                     access,
                 };
                 let ctx = ServerCtx::attach_readonly(config, embedder)

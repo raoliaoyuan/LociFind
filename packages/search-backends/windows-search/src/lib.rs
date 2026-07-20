@@ -15,8 +15,8 @@ use locifind_search_backend::{
     backend_stream_from_results, intent_sort_order, media_common_constraints,
     media_derived_file_types, relative_time_bounds, sort_results, BackendKind, BackendSearchFuture,
     BackendStream, CancellationToken, CommonConstraints, ExpandedSearchIntent, FileSearch,
-    FileType, ImplementationStatus, KeywordGroup, LocationResolver, MatchType, MediaSearch,
-    MediaType, Quality, SearchBackend, SearchError, SearchIntent, SearchResult,
+    FileType, ImplementationStatus, KeywordGroup, LocationResolver, MatchMode, MatchType,
+    MediaSearch, MediaType, Quality, SearchBackend, SearchError, SearchIntent, SearchResult,
     SearchResultMetadata, SizeExpression, SizeUnit, SortOrder, TimeExpression,
 };
 // 跨后端共用的小工具收拢在 common，后端按原名别名引入，调用点零改动。
@@ -543,12 +543,18 @@ where
     R: LocationResolver,
 {
     match &expanded.base {
-        SearchIntent::FileSearch(search) => {
-            translate_file_search_expanded(search, &expanded.keyword_groups, resolver)
-        }
-        SearchIntent::MediaSearch(search) => {
-            translate_media_search_expanded(search, &expanded.keyword_groups, resolver)
-        }
+        SearchIntent::FileSearch(search) => translate_file_search_expanded(
+            search,
+            &expanded.keyword_groups,
+            expanded.match_mode,
+            resolver,
+        ),
+        SearchIntent::MediaSearch(search) => translate_media_search_expanded(
+            search,
+            &expanded.keyword_groups,
+            expanded.match_mode,
+            resolver,
+        ),
         SearchIntent::Refine(_) | SearchIntent::FileAction(_) | SearchIntent::Clarify(_) => {
             Err(SearchError::UnsupportedIntent {
                 detail: "WindowsSearchBackend only accepts merged file_search/media_search intents"
@@ -561,13 +567,14 @@ where
 fn translate_file_search_expanded<R>(
     search: &FileSearch,
     groups: &[KeywordGroup],
+    match_mode: MatchMode,
     resolver: &R,
 ) -> Result<WindowsSearchQuery, SearchError>
 where
     R: LocationResolver,
 {
     let mut builder = SqlBuilder::new(search.limit);
-    add_keyword_groups(&mut builder, groups);
+    add_keyword_groups(&mut builder, groups, match_mode);
     add_common_constraints(
         &mut builder,
         resolver,
@@ -590,13 +597,14 @@ where
 fn translate_media_search_expanded<R>(
     search: &MediaSearch,
     groups: &[KeywordGroup],
+    match_mode: MatchMode,
     resolver: &R,
 ) -> Result<WindowsSearchQuery, SearchError>
 where
     R: LocationResolver,
 {
     let mut builder = SqlBuilder::new(search.limit);
-    add_keyword_groups(&mut builder, groups);
+    add_keyword_groups(&mut builder, groups, match_mode);
     let file_types = media_derived_file_types(search);
     add_common_constraints(
         &mut builder,
@@ -607,18 +615,37 @@ where
     Ok(builder.finish(search.sort))
 }
 
-/// 每个 keyword 组：组内同义词 × 各字段 OR 成一个谓词块；组间由 `SqlBuilder` 的 AND 连接。
-fn add_keyword_groups(builder: &mut SqlBuilder, groups: &[KeywordGroup]) {
+/// 每个 keyword 组：组内同义词 × 各字段 OR 成一个谓词块；组间按全局 `match_mode` 取
+/// AND（[`MatchMode::All`]，全部复合条件命中）或 OR（[`MatchMode::Any`]，任一条件命中）。
+/// 多组的组间连接词合并为**单个**谓词块推给 `SqlBuilder`，与其余约束（扩展名 / 时间 /
+/// 大小 / 路径）始终保持 AND——只有关键词组之间的语义受 `match_mode` 影响。
+fn add_keyword_groups(builder: &mut SqlBuilder, groups: &[KeywordGroup], match_mode: MatchMode) {
+    let mut group_predicates: Vec<String> = Vec::new();
     for group in groups.iter().filter(|group| !group.head.is_empty()) {
-        builder.keyword_group_like(
+        if let Some(predicate) = builder.keyword_group_predicate(
             &[
                 "System.ItemNameDisplay",
                 "System.FileName",
                 "System.Search.Contents",
             ],
             &group.all(),
-        );
+        ) {
+            group_predicates.push(predicate);
+        }
     }
+    if group_predicates.is_empty() {
+        return;
+    }
+    let combined = if group_predicates.len() == 1 {
+        group_predicates.into_iter().next().unwrap_or_default()
+    } else {
+        let joiner = match match_mode {
+            MatchMode::All => " AND ",
+            MatchMode::Any => " OR ",
+        };
+        format!("({})", group_predicates.join(joiner))
+    };
+    builder.push(combined);
 }
 
 fn add_common_constraints<R>(
@@ -788,9 +815,14 @@ impl SqlBuilder {
         self.push(format!("({predicates})"));
     }
 
-    /// 一个同义词组：组内所有词 × 所有字段 OR 成单个谓词块（组间由调用方 AND 连接）。
-    /// 每个词经 [`contains_pattern`] 做 `%...%` 包裹与 `LIKE` 通配符转义。
-    fn keyword_group_like(&mut self, fields: &[&'static str], terms: &[&str]) {
+    /// 一个同义词组 → 组内所有词 × 所有字段 OR 成单个谓词块字符串（不直接 push，交调用方
+    /// 按全局 `match_mode` 决定组间怎么连接）。参数按词序追加，与最终拼回的谓词文本中
+    /// `?` 占位符顺序一致。每个词经 [`contains_pattern`] 做 `%...%` 包裹与 `LIKE` 通配符转义。
+    fn keyword_group_predicate(
+        &mut self,
+        fields: &[&'static str],
+        terms: &[&str],
+    ) -> Option<String> {
         let mut predicates = Vec::with_capacity(terms.len() * fields.len());
         for &term in terms {
             let pattern = contains_pattern(term);
@@ -799,8 +831,10 @@ impl SqlBuilder {
                 predicates.push(format!("{field} LIKE ?"));
             }
         }
-        if !predicates.is_empty() {
-            self.push(format!("({})", predicates.join(" OR ")));
+        if predicates.is_empty() {
+            None
+        } else {
+            Some(format!("({})", predicates.join(" OR ")))
         }
     }
 
@@ -1294,6 +1328,7 @@ mod tests {
                 head: "工作汇报".to_owned(),
                 synonyms: vec!["述职".to_owned(), "工作总结".to_owned()],
             }],
+            match_mode: MatchMode::default(),
         };
 
         let query = translate_intent_expanded(&expanded, &MockResolver).unwrap();
@@ -1319,6 +1354,54 @@ mod tests {
         );
     }
 
+    /// 2026-07-20：全局 `MatchMode` 控制多个 keyword 组之间的连接词——`All` 组间 AND
+    /// （默认，全部复合条件命中），`Any` 组间 OR（任一条件命中）。其余约束（此处的
+    /// `extensions`）应始终与关键词组保持 AND，不受 `match_mode` 影响。
+    #[test]
+    fn expanded_multi_group_joiner_follows_match_mode() {
+        let base: SearchIntent = serde_json::from_value(serde_json::json!({
+            "schema_version": "1.0",
+            "intent": "file_search",
+            "keywords": ["工作汇报", "季度"],
+            "extensions": ["pdf"]
+        }))
+        .unwrap();
+        let groups = vec![
+            KeywordGroup::singleton("工作汇报"),
+            KeywordGroup::singleton("季度"),
+        ];
+
+        let expanded_all = locifind_search_backend::ExpandedSearchIntent {
+            base: base.clone(),
+            keyword_groups: groups.clone(),
+            match_mode: MatchMode::All,
+        };
+        let query_all = translate_intent_expanded(&expanded_all, &MockResolver).unwrap();
+        assert!(
+            query_all.sql.contains(") AND ("),
+            "All 模式组间应为 AND: {}",
+            query_all.sql
+        );
+
+        let expanded_any = locifind_search_backend::ExpandedSearchIntent {
+            base,
+            keyword_groups: groups,
+            match_mode: MatchMode::Any,
+        };
+        let query_any = translate_intent_expanded(&expanded_any, &MockResolver).unwrap();
+        assert!(
+            query_any.sql.contains(") OR ("),
+            "Any 模式组间应为 OR: {}",
+            query_any.sql
+        );
+        // extensions 约束不受 match_mode 影响，始终与关键词组块整体 AND。
+        assert!(
+            query_any.sql.contains(") AND (System.FileExtension = ?)"),
+            "扩展名约束应与关键词组块 AND 连接（不随 match_mode 变 OR）: {}",
+            query_any.sql
+        );
+    }
+
     #[test]
     fn expanded_singleton_group_matches_plain_keyword_translation() {
         let base: SearchIntent = serde_json::from_value(serde_json::json!({
@@ -1330,6 +1413,7 @@ mod tests {
         let expanded = locifind_search_backend::ExpandedSearchIntent {
             base: base.clone(),
             keyword_groups: vec![KeywordGroup::singleton("报告")],
+            match_mode: MatchMode::default(),
         };
 
         let plain = translate_intent(&base, &MockResolver).unwrap();

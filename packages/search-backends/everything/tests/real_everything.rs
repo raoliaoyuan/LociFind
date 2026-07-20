@@ -110,6 +110,7 @@ fn expanded_search_matches_synonyms_via_or() {
             head: "工作汇报".to_owned(),
             synonyms: vec!["述职".to_owned(), "工作总结".to_owned()],
         }],
+        match_mode: locifind_search_backend::MatchMode::default(),
     };
 
     let stream = block_on(backend.search_expanded(&expanded, CancellationToken::new()))

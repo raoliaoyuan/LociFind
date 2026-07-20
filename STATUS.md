@@ -6,22 +6,22 @@
 
 ## 📍 速览
 
-- **阶段**：B（Beta）进行中（**BETA-61 运行期自动增量索引 + BETA-62 MCP 索引中提示**随 **v0.9.31** 发布〔v0.9.30 热修经核实已于 2026-07-09 发布〕，v0.9.27~30 详见会话日志）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
+- **阶段**：B（Beta）进行中（**BETA-63 多复合条件检索全局匹配模式（AND/OR 可选）**待发 **v0.9.32**；v0.9.27~31 详见会话日志）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**2026-07-10 BETA-61 运行期自动增量索引 + BETA-62 MCP 索引进行中提示（并入 main 待发版）**——两任务均分派 Codex CLI headless（62 在独立 worktree 并行）、Claude Code 任务书/复核/合树/真机验证：1 分钟间隔 e2e——tick 准点、启动索引期守卫让路、新文件 tick 后 `doc_added=1` 其余全 0、FTS 标记词命中、删除下一 tick 回收归零。**v0.9.31 双平台已发布 ✅**（2026-07-10，Release 说明含 changelog；核实 v0.9.30 昨日已发布、非「待推」）。
+- **当前 task**：**2026-07-20 BETA-63 多复合条件检索全局匹配模式（AND 全命中 / OR 任一命中）**——用户反馈多条件检索返回大量不符合要求的结果，复盘定位到 BETA-57 遗留的「组间 AND 0 命中静默放宽为 OR」自动兜底是根因；移除该兜底、改为显式全局 `MatchMode` 配置（默认 All 严格、四检索后端统一生效）。**待推 `v0.9.32` tag 触发 CI 双平台发布**。
 - **下一步 top-3**：① **设计伙伴/首个真实部署主动获取**（护城河 P0，ROADMAP §5；BETA-40 真实内网证据/BETA-44 语料扩充均以此为前提）；② **macOS 真机整体待跑**（出场线 Class A 唯一剩项；**v0.9.23 macOS DMG 已产出、具备真机测试前提**；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；③ BETA-53 可选复核：真 Claude Code 进程连 `~/.claude/settings.json` 走一遍（[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（音乐全盘发现语义 2026-07-06 方案 A〔按 roots 过滤〕拍板并落地）。
 
 ## 当前 Task
 
-**2026-07-10（最新）**：**BETA-61 运行期自动增量索引 + BETA-62 MCP 索引进行中提示**（均并入 main 待发版，验收细节见 ROADMAP 卡片）。用户要求「增量/变动文件自动索引、未变不重索引」并指定分派 Codex、Claude Code 监督。摸底：`run_incremental_index` 增量骨架（mtime skip + 删除回收）健全，缺口＝触发时机仅「启动 + 手动」→ 方案定**运行期定时增量重扫**（复用 `perform_reindex` 全套护栏；不做 notify watcher）。**BETA-61**：settings 新字段 `auto_index_interval_minutes`（默认 30 / 0=关 / live-read）+ main.rs 定时循环（首轮等完整间隔、tick 并发守卫让路、接语义 worker）+ 设置页下拉。**真机 e2e 达成**（dev app、1 分钟间隔）：tick 准点、启动索引期守卫全程让路、新文件 tick 后 `doc_added=1` 其余全 0、FTS 标记词直查 index.db 命中、删除下一 tick 回收归零。**BETA-62**（v0.9.30 未尽项清账）：`ServerCtx` 加 `IndexingProbe`，`search` 索引中附 `indexing_in_progress` + note、audit 带标志、desktop 桥 `IndexStatus.indexing`、daemon 桥 `reindex_in_flight`，单测锁旧 JSON 字节形状。合并验证 fmt/clippy `-D warnings`/desktop 181/server 95/locifindd 8+13 全绿、tsc 净。**v0.9.31 双平台已发布 ✅**（2026-07-10：Windows x64-setup + macOS DMG/app.tar.gz 产物齐、Release 说明含 changelog；核实 v0.9.30 已于 07-09 发布、原「待推 tag」记载过时）。**发版中附带修复**：CI ubuntu 拉到 Rust 1.97（07-07 发布）、新 lint `useless_borrows_in_formatting` 打红 main 质量门（`real_pdf.rs` 存量测试一处多余 `&`）——本地 rustup 升 1.97 + clean 后全仓 clippy 扫净确认仅此一处、修复推送后 CI 转绿（Release workflow 无 clippy 步骤、发布未受影响）。**未尽**：2 字 CJK trigram 限制仍在（[[cjk-short-query-trigram-like-fallback]]）。
+**2026-07-20（最新）**：**BETA-63 多复合条件检索全局匹配模式**（并入 main 待发版，验收细节见 ROADMAP 卡片）。用户反馈「多条件检索返回大量不符合要求的结果」，要求梳理索引构建与检索命中逻辑并优化。**根因**：BETA-57 遗留的 `LocalIndexBackend` 组间 AND 0 命中静默放宽为 OR 的自动兜底——用户无感知地被扩大召回，只命中部分条件的结果混入。**用户三点拍板**：① All 模式 0 命中即 0、不再静默放宽；② 全局默认 All；③ 四个检索后端统一生效。**产出**：新增 `MatchMode`（`All`/`Any`）枚举挂 `ExpandedSearchIntent.match_mode` 单一信源（`packages/search-backends/common`）；local-index/windows-search/everything/spotlight 各自的组间连接逻辑均切换为按 `match_mode` 取 AND/OR，结构性约束（扩展名/时间/大小/路径）不受影响；local-index 移除 `fts_or_relax_from_groups` 自动兜底。桌面端 `AppSettings.search_match_all_conditions`（默认 true）+「常规」面板下拉框 + live-read provider（同 `semantic_weight` 模式）；daemon 无 settings.json、新增 CLI `--match-any-condition` 启动期一次性注入；桌面内嵌 MCP 服务读同一份桌面设置。测试：四后端各补 All/Any 对照单测 + local-index 端到端复现 BETA-57 原始场景（All 严格 0、Any 命中）；desktop settings round-trip 测试。全 workspace `cargo test`/`clippy -D warnings`/`fmt` 净（daemon e2e 3 个失败经 `git stash` 对照基线确认系本机沙盒临时目录路径问题、与本次改动无关）。**待推 `v0.9.32` tag 触发 CI 双平台发布**。
 
 ## 下一步
 
 1. **BETA-53 剩余真机项**（功能级 + 真机 GUI 全流程已验，[报告](docs/reviews/beta-53-mcp-service-verify-2026-07-07.md)：harness 跑通 §2/§3/§4 + computer-use 驱动 dev app 实点——菜单/tab 路由·开关联动后端起停·token/配置片段复制·自启·旧设置迁移·对实跑 app curl 全通过）：**仅剩** ① 真 Claude Code 进程实连（协议已 curl 验过）、② 语义命中（`semantic-recall` 构建路径 B）——均依赖用户。
 2. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
 3. **真机验证剩余项**（Windows 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)：BETA-47/50/51/52/29〔v1+v2〕/33〔单实例锁·设置流〕 + 基础搜索 + BETA-12 卸载·升级）——**Windows 仅剩**：BETA-49 音乐发现不越界（依赖目录配置）、BETA-43 出处/`read_document`/审计导出（[playbooks README](docs/playbooks/README.md) 第 8/9 条，需 daemon + 外部 LLM；**其中 `read_document` 正斜杠 root round-trip bug 本轮已修**）、BETA-33 cycle 9 WSearch 状态条 / 全库-概貌口径差；**macOS 整体待跑**（按 [manual-test-scenarios](docs/manual-test-scenarios.md)）。
-4. **发版进度**：…→ **v0.9.24**（BETA-56 短 CJK 兜底）→ **v0.9.25**（BETA-57 AND→OR 兜底）→ **v0.9.26**（BETA-57/58/59）→ **v0.9.27**（BETA-60 检索+索引性能）→ **v0.9.28**（热修 BETA-60 两处索引回退）→ **v0.9.29**（热修真机栈溢出崩溃：PDF 提取线程池加 64 MiB 栈）→ **v0.9.30**（热修内嵌 MCP 端口竞态：`AddrInUse` 有界重试，2026-07-09 已发布）→ **v0.9.31**（BETA-61 自动增量索引 + BETA-62 MCP 索引中提示，2026-07-10 **双平台已发布 ✅** 含 changelog）。并发机制累计稳。
+4. **发版进度**：…→ **v0.9.29**（热修真机栈溢出崩溃：PDF 提取线程池加 64 MiB 栈）→ **v0.9.30**（热修内嵌 MCP 端口竞态：`AddrInUse` 有界重试，2026-07-09 已发布）→ **v0.9.31**（BETA-61 自动增量索引 + BETA-62 MCP 索引中提示，2026-07-10 双平台已发布 ✅ 含 changelog）→ **v0.9.32**（BETA-63 多复合条件检索全局匹配模式，**待推 tag**）。并发机制累计稳。
 5. **BETA-10 剩余**：macOS DMG 产物 CI done 且 **v0.9.15 首验通过**；剩 macOS 真机放行验证（§6.3）；winget 待 BETA-14 后 / Homebrew tap 可启动（DMG CI 已跑通）。
 6. **BETA-40 真实内网证据**：唯一剩余验收项，依赖 ②。
 7. **剩余 6 条 partial**（不阻塞出场线，[beta-exit §3.4](docs/reviews/beta-exit.md)）：全为 v0.5 标注锁定项（markdown ft / 「上个月下载的」动词歧义 / 项目归档 location / downloads hint 双语 ×2，改标注吃 §6.5 豁免额度）+ 备份文件两难。parser 可确定性收割已见底。
@@ -38,6 +38,10 @@
 ## 会话日志
 
 > 摘要 ≤5 条；全文与更早历史：[STATUS-archive-2026-07.md](docs/session-logs/STATUS-archive-2026-07.md) → [STATUS-archive-2026-06.md](docs/session-logs/STATUS-archive-2026-06.md) → [STATUS-archive-through-2026-06-03.md](docs/session-logs/STATUS-archive-through-2026-06-03.md)。
+
+### 2026-07-20 — Claude Code (Sonnet 5) — BETA-63 多复合条件检索全局匹配模式（AND/OR 可选，移除 BETA-57 静默兜底）
+
+**承接**：用户反馈「多条件检索返回大量不符合要求的结果」，要求梳理索引构建与检索命中逻辑并优化。**诊断**：`LocalIndexBackend::search_results_expanded`（[lib.rs](packages/search-backends/local-index/src/lib.rs)）里 BETA-57 遗留的「组间 AND 0 命中静默放宽为 OR」自动兜底——用户无感知地被扩大召回，只命中部分条件的结果混入。**关键决策**（用户三点拍板）：① All 模式 0 命中即 0、不再静默放宽；② 全局默认 All；③ 四个检索后端（local-index/windows-search/everything/spotlight）统一生效。**产出**：`packages/search-backends/common` 新增 `MatchMode` 枚举挂 `ExpandedSearchIntent.match_mode` 单一信源；四后端组间连接逻辑均改按 `match_mode` 取 AND/OR（结构性约束如扩展名/时间/大小/路径恒 AND、不受影响）；local-index 移除 `fts_or_relax_from_groups`。桌面端 `AppSettings.search_match_all_conditions`（默认 true）+「常规」面板下拉框 + live-read provider；daemon 新增 CLI `--match-any-condition`（无 settings.json、启动期一次性注入）；桌面内嵌 MCP 服务读同一份桌面设置。全 workspace `cargo test`/`clippy -D warnings`/`fmt` 净（daemon e2e 3 个失败经 `git stash` 对照基线确认系本机沙盒临时目录路径问题、与本次改动无关，详见 ROADMAP BETA-63 卡）。**未尽事宜**：无。待推 `v0.9.32` tag 触发 CI 双平台发布。
 
 ### 2026-07-10 — Claude Code (Fable 5) — BETA-61 自动增量索引 + BETA-62 MCP 索引中提示（Codex 分派 + 真机 e2e）
 

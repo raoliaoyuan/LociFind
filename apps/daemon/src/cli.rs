@@ -50,6 +50,13 @@ pub struct Cli {
     #[arg(long)]
     pub disable_image_semantics: bool,
 
+    /// 2026-07-20：多个复合检索条件（关键词组）之间的匹配模式改为「任一条件命中」
+    /// （组间 OR，广召回）。daemon 无 settings.json、无法像桌面端 live-read，
+    /// 启动时一次性决定；默认关（严格要求全部复合条件命中，与桌面端默认口径一致，
+    /// 取代 BETA-57 旧版自动 OR 兜底）。
+    #[arg(long)]
+    pub match_any_condition: bool,
+
     /// 日志格式（text 或 json）。
     #[arg(long, default_value = "text")]
     pub log_format: String,

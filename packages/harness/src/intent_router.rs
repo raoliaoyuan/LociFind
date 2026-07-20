@@ -628,6 +628,7 @@ mod tests {
                 head: "工作汇报".to_owned(),
                 synonyms: vec!["述职".to_owned()],
             }],
+            match_mode: locifind_search_backend::MatchMode::default(),
         };
         let tool = router.route_search_expanded(&expanded).unwrap();
         assert_eq!(tool.id(), "search.windows_search");
@@ -642,6 +643,7 @@ mod tests {
         let expanded = ExpandedSearchIntent {
             base: file_search_extensions_only(),
             keyword_groups: vec![],
+            match_mode: locifind_search_backend::MatchMode::default(),
         };
         let tool = router.route_search_expanded(&expanded).unwrap();
         assert_eq!(tool.id(), "search.everything");
@@ -815,6 +817,7 @@ mod tests {
                 head: "工作汇报".to_owned(),
                 synonyms: vec!["述职".to_owned()],
             }],
+            match_mode: locifind_search_backend::MatchMode::default(),
         };
         let fanout = router.route_search_fanout(&expanded).unwrap();
         assert_eq!(
@@ -864,6 +867,7 @@ mod tests {
                 head: "工作汇报".to_owned(),
                 synonyms: vec![],
             }],
+            match_mode: locifind_search_backend::MatchMode::default(),
         };
         let fanout = router.route_search_fanout(&expanded).unwrap();
         assert_eq!(

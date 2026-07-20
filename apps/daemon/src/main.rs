@@ -86,6 +86,11 @@ async fn main() -> Result<()> {
             .semantic_weight
             .unwrap_or(locifind_server::tools::search::DEFAULT_SEMANTIC_WEIGHT),
         embed_images: !cli.disable_image_semantics,
+        match_mode: if cli.match_any_condition {
+            locifind_search_backend::MatchMode::Any
+        } else {
+            locifind_search_backend::MatchMode::All
+        },
         access,
     };
 

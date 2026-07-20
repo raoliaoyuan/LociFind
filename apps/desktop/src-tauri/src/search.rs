@@ -148,6 +148,12 @@ pub struct SearchDeps {
     /// `new()` 默认返 false（现状一刀切）；main.rs 经 [`with_image_semantics_provider`]
     /// 注入 `settings::read_enable_image_semantics` 闭包，段落级 explain 每次调读最新值。
     image_semantics_provider: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    /// 2026-07-20：全局复合条件匹配模式 provider（live-read settings.json）。`new()` 默认
+    /// 返 `MatchMode::All`（严格全部命中，与 `AppSettings::default()` 口径一致）；main.rs
+    /// 经 [`with_match_mode_provider`] 注入 `settings::read_search_match_all_conditions`
+    /// 闭包，`search_impl`/预览高亮每次调读最新值。
+    match_mode_provider:
+        std::sync::Arc<dyn Fn() -> locifind_search_backend::MatchMode + Send + Sync>,
 }
 
 impl SearchDeps {
@@ -179,6 +185,7 @@ impl SearchDeps {
                 locifind_result_normalizer::DEFAULT_SEMANTIC_WEIGHT
             }),
             image_semantics_provider: std::sync::Arc::new(|| false),
+            match_mode_provider: std::sync::Arc::new(|| locifind_search_backend::MatchMode::All),
         }
     }
 
@@ -241,6 +248,21 @@ impl SearchDeps {
     /// 只读：图片语义索引 opt-in 当前是否开启（调闭包 → live-read 设置文件）。
     pub(crate) fn image_semantics_enabled(&self) -> bool {
         (self.image_semantics_provider)()
+    }
+
+    /// 注入复合条件匹配模式 provider（main.rs 用，每次查询 live-read settings.json）。
+    #[must_use]
+    pub fn with_match_mode_provider(
+        mut self,
+        provider: std::sync::Arc<dyn Fn() -> locifind_search_backend::MatchMode + Send + Sync>,
+    ) -> Self {
+        self.match_mode_provider = provider;
+        self
+    }
+
+    /// 只读：当前全局复合条件匹配模式（调闭包 → live-read 设置文件）。
+    pub(crate) fn match_mode(&self) -> locifind_search_backend::MatchMode {
+        (self.match_mode_provider)()
     }
 
     /// 注入持久审计日志（main.rs 用 `JsonlAuditLog`；测试可注入 `InMemoryAuditLog` 后断言）。
@@ -540,10 +562,12 @@ async fn run_resolved_search(
     //    BETA-11D：adhoc 注入在 expand 之后、路由之前，保证 adhoc OR 组影响能力感知路由。
     let expanded = {
         let e = deps.synonym_expander().expand(effective.clone(), &query);
-        match &adhoc {
+        let e = match &adhoc {
             Some((head, aliases)) => inject_adhoc_group(e, head, aliases.clone()),
             None => e,
-        }
+        };
+        // 2026-07-20：全局复合条件匹配模式（live-read settings.json），四个检索后端统一读取。
+        e.with_match_mode(deps.match_mode())
     };
 
     let router = IntentRouter::new(&deps.registry);

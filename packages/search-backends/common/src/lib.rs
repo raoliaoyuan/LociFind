@@ -1262,7 +1262,7 @@ pub struct Clarify {
 // ============================================================
 
 pub mod expanded;
-pub use expanded::{ExpandedSearchIntent, KeywordGroup};
+pub use expanded::{ExpandedSearchIntent, KeywordGroup, MatchMode};
 
 // ============================================================
 // §14. 单元测试：枚举名 ↔ JSON 字符串映射
@@ -1653,6 +1653,7 @@ mod search_expanded_default_tests {
                 head: "工作汇报".into(),
                 synonyms: vec!["述职".into()],
             }],
+            match_mode: MatchMode::default(),
         };
 
         let backend = FakeBackend::default();

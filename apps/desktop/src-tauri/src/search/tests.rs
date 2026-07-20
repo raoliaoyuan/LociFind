@@ -2814,6 +2814,7 @@ fn inject_adhoc_group_overrides_same_head() {
     let expanded = ExpandedSearchIntent {
         base,
         keyword_groups: vec![KeywordGroup::singleton("友商竞争分析")],
+        match_mode: locifind_search_backend::MatchMode::default(),
     };
     let out =
         super::inject_adhoc_group(expanded, "友商竞争分析", vec!["AWS".into(), "Azure".into()]);
@@ -2846,6 +2847,7 @@ fn inject_adhoc_group_inserts_new_head_at_front() {
     let expanded = ExpandedSearchIntent {
         base,
         keyword_groups: vec![KeywordGroup::singleton("竞品")],
+        match_mode: locifind_search_backend::MatchMode::default(),
     };
     // adhoc head 不在现有 groups 中，应插到最前
     let out = super::inject_adhoc_group(expanded, "对标产品", vec!["competitor".into()]);
@@ -2879,6 +2881,7 @@ fn inject_adhoc_group_deduplicates_and_filters_aliases() {
     let expanded = ExpandedSearchIntent {
         base,
         keyword_groups: vec![KeywordGroup::singleton("报告")],
+        match_mode: locifind_search_backend::MatchMode::default(),
     };
     // 空串、等于 head、重复项均应被过滤
     let out = super::inject_adhoc_group(

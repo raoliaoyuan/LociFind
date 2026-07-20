@@ -94,6 +94,7 @@ impl DaemonHandle {
             log_level: LevelFilter::OFF,
             semantic_weight: locifind_server::tools::search::DEFAULT_SEMANTIC_WEIGHT,
             embed_images: true,
+            match_mode: locifind_search_backend::MatchMode::All,
             access,
         };
 
@@ -160,6 +161,7 @@ impl DaemonHandle {
             log_level: LevelFilter::OFF,
             semantic_weight: locifind_server::tools::search::DEFAULT_SEMANTIC_WEIGHT,
             embed_images: true,
+            match_mode: locifind_search_backend::MatchMode::All,
             access,
         };
         let corpus: Vec<(&str, &str, &str)> = vec![

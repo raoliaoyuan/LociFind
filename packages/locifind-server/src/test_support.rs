@@ -167,6 +167,7 @@ fn test_server_config(
         log_level: LevelFilter::WARN,
         semantic_weight: locifind_result_normalizer::DEFAULT_SEMANTIC_WEIGHT,
         embed_images: true,
+        match_mode: locifind_search_backend::MatchMode::All,
         access,
     }
 }

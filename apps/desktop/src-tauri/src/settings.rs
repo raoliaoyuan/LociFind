@@ -56,6 +56,12 @@ pub struct AppSettings {
     /// None = 尚未生成；重置令牌时清空并重新生成。**属于敏感凭据**——settings.json
     /// 已与 index.db 同权限目录，与其他本机数据同级。
     pub mcp_service_token: Option<String>,
+    /// 2026-07-20：多个复合检索条件（关键词组）之间的匹配模式，全局配置。
+    /// `true`（默认）= 全部复合条件命中（严格 AND，0 命中即 0，不再静默放宽）；
+    /// `false` = 任一条件命中（OR，广召回）。四个检索后端统一读取，详见
+    /// `locifind_search_backend::MatchMode`。取代 BETA-57 旧版自动 OR 兜底——
+    /// 用户反馈该静默放宽会把只命中部分条件的结果当正常结果返回，造成大量噪音。
+    pub search_match_all_conditions: bool,
 }
 
 /// BETA-33 cycle 7-b：per-root 子路径排除项。
@@ -97,6 +103,7 @@ impl Default for AppSettings {
             enable_everything: true,
             mcp_service_enabled: false,
             mcp_service_token: None,
+            search_match_all_conditions: true,
         }
     }
 }
@@ -289,6 +296,16 @@ pub(crate) fn read_auto_index_interval_minutes(settings_path: &Option<std::path:
         .map_or(DEFAULT_AUTO_INDEX_INTERVAL_MINUTES, |v| {
             v.auto_index_interval_minutes
         })
+}
+
+/// 从 settings.json live-read 复合条件匹配模式（每次查询调，`search_impl`/预览高亮共用）。
+/// 读 / 解析失败 → **true**（安全侧 = 严格全部命中，不因配置损坏静默扩大召回）。
+pub(crate) fn read_search_match_all_conditions(settings_path: &Option<PathBuf>) -> bool {
+    settings_path
+        .as_ref()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<AppSettings>(&s).ok())
+        .map_or(true, |v| v.search_match_all_conditions)
 }
 
 /// BETA-53：best-effort 读取完整 `AppSettings`（`settings_path` 指向 settings.json）。
@@ -592,6 +609,33 @@ mod tests {
         // 配置损坏 → true（不因坏文件静默关加速）。
         std::fs::write(&f, "not json").unwrap();
         assert!(read_enable_everything(&Some(f)));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn search_match_all_conditions_defaults_on_and_reads_ok() {
+        assert!(
+            AppSettings::default().search_match_all_conditions,
+            "默认严格全部条件命中"
+        );
+        let json = r#"{"global_shortcut":"Ctrl+Space"}"#;
+        let s: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(
+            s.search_match_all_conditions,
+            "旧配置缺字段 → true（默认严格全部命中）"
+        );
+        // live-read：无路径 → true（安全侧）；有配置 → 读真值。
+        assert!(read_search_match_all_conditions(&None));
+        let dir = std::env::temp_dir().join(format!("locifind-match-mode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("settings.json");
+        std::fs::write(&f, r#"{"search_match_all_conditions":false}"#).unwrap();
+        assert!(!read_search_match_all_conditions(&Some(f.clone())));
+        std::fs::write(&f, r#"{"search_match_all_conditions":true}"#).unwrap();
+        assert!(read_search_match_all_conditions(&Some(f.clone())));
+        // 配置损坏 → true（不因坏文件静默放宽为任一命中）。
+        std::fs::write(&f, "not json").unwrap();
+        assert!(read_search_match_all_conditions(&Some(f)));
         std::fs::remove_dir_all(&dir).ok();
     }
 

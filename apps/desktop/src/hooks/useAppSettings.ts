@@ -41,6 +41,10 @@ export interface AppSettings {
   root_excludes: RootExclude[];
   /** 运行期自动增量索引间隔（分钟）。0 = 关闭。 */
   auto_index_interval_minutes: number;
+  /** 2026-07-20：多个复合检索条件（关键词组）之间的匹配模式，全局配置。
+   *  true（默认）= 全部复合条件命中（严格 AND）；false = 任一条件命中（OR，广召回）。
+   *  四个检索后端（本地索引 / Windows Search / Everything / Spotlight）统一读取。 */
+  search_match_all_conditions: boolean;
 }
 
 /**

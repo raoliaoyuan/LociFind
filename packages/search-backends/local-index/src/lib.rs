@@ -21,7 +21,7 @@ use locifind_indexer::{
 use locifind_indexer::IMAGE_EXTS as IMAGE_DOC_TYPES;
 use locifind_search_backend::{
     backend_stream_from_results, BackendKind, BackendSearchFuture, CancellationToken,
-    ExpandedSearchIntent, FileSearch, KeywordGroup, MatchType, MediaSearch, MediaType,
+    ExpandedSearchIntent, FileSearch, KeywordGroup, MatchMode, MatchType, MediaSearch, MediaType,
     SearchBackend, SearchError, SearchIntent, SearchResult, SearchResultMetadata,
 };
 // result_id 与三系统后端共用 common 的单一实现，保证跨源去重 ID 口径一致。
@@ -427,26 +427,21 @@ impl LocalIndexBackend {
     }
 
     /// 扩展查询（`search_expanded`，fan-out/chain 生产路径）：从 `keyword_groups` 构造
-    /// FTS5 布尔表达式（组内 OR、组间 AND）喂给本地 FTS——这样 parser 未抽 keyword、由
-    /// 同义词扩展 / BETA-15E gazetteer 注入到词组的关键词也能命中本地索引（OCR / 文档 / 音乐）。
-    /// 词组为空（如纯 artist / 纯类型查询）→ `fts` 为 None，回退 base keyword 路径。
+    /// FTS5 布尔表达式（组内恒 OR，组间按 `expanded.match_mode` 取 AND/OR）喂给本地 FTS——
+    /// 这样 parser 未抽 keyword、由同义词扩展 / BETA-15E gazetteer 注入到词组的关键词也能
+    /// 命中本地索引（OCR / 文档 / 音乐）。词组为空（如纯 artist / 纯类型查询）→ `fts` 为
+    /// None，回退 base keyword 路径。
+    ///
+    /// 2026-07-20：移除 BETA-57 的「组间 AND 0 命中静默放宽为 OR」自动兜底——用户反馈该
+    /// 静默放宽会把「只命中部分条件」的结果当成正常结果返回，造成大量不符合要求的噪音。
+    /// 现改为**显式**的全局 `MatchMode` 配置：`All` 严格要求全部复合条件命中（0 命中就是
+    /// 0，不再重试）；`Any` 直接按任一条件命中查询，无需二次查询。
     fn search_results_expanded(
         &self,
         expanded: &ExpandedSearchIntent,
     ) -> Result<Vec<SearchResult>, SearchError> {
-        let fts = fts_match_from_groups(&expanded.keyword_groups);
-        let results = self.search_results_inner(&expanded.base, fts.as_deref())?;
-        // BETA-57：组间 AND 0 命中时的 OR 兜底。多词自然语言查询（如「体检 健康检查 健康体检」）
-        // 经 parser 拆成多个词组、组间 AND 要求全部命中——只要一个词不在文档里整条就归零，
-        // 与用户「多给近义词求召回」的心智相反。仅当 AND 返回空且有 ≥2 有效词组时，放宽成
-        // 组间 OR 重试一次：已命中的查询行为完全不变（零精确性回归），FTS bm25 天然让命中更
-        // 多词项的文档排前。单组时 AND≡OR、`fts_or_relax_from_groups` 返 None → 不重复查询。
-        if results.is_empty() {
-            if let Some(or_fts) = fts_or_relax_from_groups(&expanded.keyword_groups) {
-                return self.search_results_inner(&expanded.base, Some(&or_fts));
-            }
-        }
-        Ok(results)
+        let fts = fts_match_from_groups(&expanded.keyword_groups, expanded.match_mode);
+        self.search_results_inner(&expanded.base, fts.as_deref())
     }
 
     /// 共享查询执行。`fts` 为预构造的原始 FTS5 表达式（来自词组）；`Some` 时优先于 base keyword
@@ -505,39 +500,52 @@ impl LocalIndexBackend {
 }
 
 /// [`fts_match_from_groups`] 的公开版（BETA-20 预览高亮复用与搜索同款的「词组 → FTS5 表达式」
-/// 逻辑：组内 OR、组间 AND），让命中片段与实际搜索命中口径一致。
+/// 逻辑：组内 OR、组间按 `match_mode` 取 AND/OR），让命中片段与实际搜索命中口径一致。
 #[must_use]
-pub fn fts_match_for_groups(groups: &[KeywordGroup]) -> Option<String> {
-    fts_match_from_groups(groups)
+pub fn fts_match_for_groups(groups: &[KeywordGroup], match_mode: MatchMode) -> Option<String> {
+    fts_match_from_groups(groups, match_mode)
 }
 
-/// 把 `keyword_groups` 译成 FTS5 MATCH 表达式：**组内 OR、组间 AND**，每词项双引号包裹
-/// （内部 `"` 转义为 `""`）。空词项跳过；全空 → `None`。trigram tokenizer 下引号短语即子串匹配。
+/// 把 `keyword_groups` 译成 FTS5 MATCH 表达式：**组内恒 OR**，组间按 `match_mode` 取
+/// AND（[`MatchMode::All`]，全部复合条件命中）或 OR（[`MatchMode::Any`]，任一条件命中），
+/// 每词项双引号包裹（内部 `"` 转义为 `""`）。空词项跳过；全空 → `None`。trigram tokenizer
+/// 下引号短语即子串匹配。
 ///
 /// BETA-42：`documents_fts` 的 `tokenize='trigram'` 要求词项 ≥3 字符才能生成可匹配 token，
 /// 但中文关键词切词允许 2 字（"判决"/"违约"等）。这类短词若原样进 AND 条件，该子句在
 /// trigram 索引下恒不可能匹配，会让整个 AND 表达式结构性 0 命中（哪怕其余词项都能命中）。
 /// 剔除 <3 字纯 CJK 词项——不参与本地 FTS 匹配约束，但不拖垮同组内可匹配的长词 / 其他组。
-fn fts_match_from_groups(groups: &[KeywordGroup]) -> Option<String> {
-    let mut clauses: Vec<String> = Vec::new();
-    for group in groups {
-        let terms = sanitized_group_terms(group);
-        match terms.len() {
-            0 => {}
-            1 => clauses.push(terms.into_iter().next().unwrap_or_default()),
-            _ => clauses.push(format!("({})", terms.join(" OR "))),
+fn fts_match_from_groups(groups: &[KeywordGroup], match_mode: MatchMode) -> Option<String> {
+    match match_mode {
+        MatchMode::All => {
+            let mut clauses: Vec<String> = Vec::new();
+            for group in groups {
+                let terms = sanitized_group_terms(group);
+                match terms.len() {
+                    0 => {}
+                    1 => clauses.push(terms.into_iter().next().unwrap_or_default()),
+                    _ => clauses.push(format!("({})", terms.join(" OR "))),
+                }
+            }
+            if clauses.is_empty() {
+                None
+            } else {
+                Some(clauses.join(" AND "))
+            }
         }
-    }
-    if clauses.is_empty() {
-        None
-    } else {
-        Some(clauses.join(" AND "))
+        MatchMode::Any => {
+            let all_terms: Vec<String> = groups.iter().flat_map(sanitized_group_terms).collect();
+            match all_terms.len() {
+                0 => None,
+                1 => all_terms.into_iter().next(),
+                _ => Some(format!("({})", all_terms.join(" OR "))),
+            }
+        }
     }
 }
 
 /// 单个词组 → 清洗后的 FTS5 词项列表（trim、剔空、剔 <3 字纯 CJK、内部 `"` 转义为 `""`）。
-/// [`fts_match_from_groups`]（组内 OR / 组间 AND）与 [`fts_or_relax_from_groups`]（全 OR 兜底）
-/// 共用，保证两种表达式「哪些词项参与匹配」口径一致。
+/// [`fts_match_from_groups`] 的 `All`/`Any` 两种模式共用，保证「哪些词项参与匹配」口径一致。
 fn sanitized_group_terms(group: &KeywordGroup) -> Vec<String> {
     group
         .all()
@@ -547,28 +555,6 @@ fn sanitized_group_terms(group: &KeywordGroup) -> Vec<String> {
         .filter(|t| !is_short_cjk_term(t))
         .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
         .collect()
-}
-
-/// BETA-57：[`fts_match_from_groups`] 组间 AND 0 命中时的 OR 兜底表达式——把**所有**词组的
-/// 词项摊平进单个 OR 子句（组内本就 OR，这里进一步把组间 AND 放宽成 OR）。修复「多词自然
-/// 语言查询里只要有一个词不在文档就整条归零」的召回缺陷。
-///
-/// 仅当有效词项来自 **≥2 个词组** 时返回 `Some`：单组时组间 AND 与 OR 表达式等价、重试纯属
-/// 重复查询 → `None`（调用方据此跳过兜底）。全空 / 仅 1 词项同样 `None`。
-fn fts_or_relax_from_groups(groups: &[KeywordGroup]) -> Option<String> {
-    let mut all_terms: Vec<String> = Vec::new();
-    let mut non_empty_groups = 0usize;
-    for group in groups {
-        let terms = sanitized_group_terms(group);
-        if !terms.is_empty() {
-            non_empty_groups += 1;
-            all_terms.extend(terms);
-        }
-    }
-    if non_empty_groups < 2 || all_terms.len() < 2 {
-        return None;
-    }
-    Some(format!("({})", all_terms.join(" OR ")))
 }
 
 /// 词项是否为 <3 字符的纯 CJK 词（trigram tokenizer 结构性无法匹配，见 [`fts_match_from_groups`]）。
@@ -1035,6 +1021,7 @@ mod tests {
         ExpandedSearchIntent {
             base,
             keyword_groups: groups,
+            match_mode: MatchMode::default(),
         }
     }
 
@@ -1047,16 +1034,58 @@ mod tests {
 
     #[test]
     fn fts_match_from_groups_builds_boolean() {
-        // 组内 OR、组间 AND；单词组不加括号；引号转义。
+        // All 模式：组内 OR、组间 AND；单词组不加括号；引号转义。
         assert_eq!(
-            fts_match_from_groups(&[group("a", &["b"]), KeywordGroup::singleton("c")]).as_deref(),
+            fts_match_from_groups(
+                &[group("a", &["b"]), KeywordGroup::singleton("c")],
+                MatchMode::All
+            )
+            .as_deref(),
             Some("(\"a\" OR \"b\") AND \"c\"")
         );
         assert_eq!(
-            fts_match_from_groups(&[KeywordGroup::singleton("会议纪要")]).as_deref(),
+            fts_match_from_groups(&[KeywordGroup::singleton("会议纪要")], MatchMode::All)
+                .as_deref(),
             Some("\"会议纪要\"")
         );
-        assert_eq!(fts_match_from_groups(&[]), None);
+        assert_eq!(fts_match_from_groups(&[], MatchMode::All), None);
+    }
+
+    #[test]
+    fn fts_match_from_groups_any_mode_flattens_all_terms_to_or() {
+        // Any 模式：所有词组的词项摊平成单个 OR 子句（任一条件命中即可），全局配置显式选择，
+        // 不再是 BETA-57 旧版「AND 0 命中静默重试」，而是从一开始就按此口径查询。
+        assert_eq!(
+            fts_match_from_groups(
+                &[
+                    KeywordGroup::singleton("体检报告"),
+                    KeywordGroup::singleton("健康检查"),
+                    KeywordGroup::singleton("健康体检"),
+                ],
+                MatchMode::Any
+            )
+            .as_deref(),
+            Some("(\"体检报告\" OR \"健康检查\" OR \"健康体检\")")
+        );
+        // 组内同义词一并摊平进同一 OR。
+        assert_eq!(
+            fts_match_from_groups(
+                &[
+                    group("会议纪要", &["会议记录"]),
+                    KeywordGroup::singleton("季度报告"),
+                ],
+                MatchMode::Any
+            )
+            .as_deref(),
+            Some("(\"会议纪要\" OR \"会议记录\" OR \"季度报告\")")
+        );
+        // 单个有效词组 → 不加括号，与 All 模式单组结果一致。
+        assert_eq!(
+            fts_match_from_groups(&[KeywordGroup::singleton("体检报告")], MatchMode::Any)
+                .as_deref(),
+            Some("\"体检报告\"")
+        );
+        assert_eq!(fts_match_from_groups(&[], MatchMode::Any), None);
     }
 
     #[test]
@@ -1064,68 +1093,37 @@ mod tests {
         // BETA-42 回归：「判决 违约金」类查询——2 字纯 CJK 词组（"判决"）trigram 下恒不可能
         // 匹配，若原样进 AND 会让整个表达式结构性 0 命中；剔除后只留可匹配的 3 字词组。
         assert_eq!(
-            fts_match_from_groups(&[
-                KeywordGroup::singleton("判决"),
-                KeywordGroup::singleton("违约金"),
-            ])
+            fts_match_from_groups(
+                &[
+                    KeywordGroup::singleton("判决"),
+                    KeywordGroup::singleton("违约金"),
+                ],
+                MatchMode::All
+            )
             .as_deref(),
             Some("\"违约金\"")
         );
         // 组内同义词有短有长：短词剔除，组内只剩长词（不再是 OR 括号）。
         assert_eq!(
-            fts_match_from_groups(&[group("判决", &["裁决书"])]).as_deref(),
+            fts_match_from_groups(&[group("判决", &["裁决书"])], MatchMode::All).as_deref(),
             Some("\"裁决书\"")
         );
         // 组内全为短 CJK 词 → 整组丢弃，不产生恒假的 AND 子句。
         assert_eq!(
-            fts_match_from_groups(&[
-                KeywordGroup::singleton("判决"),
-                KeywordGroup::singleton("交接"),
-            ]),
+            fts_match_from_groups(
+                &[
+                    KeywordGroup::singleton("判决"),
+                    KeywordGroup::singleton("交接"),
+                ],
+                MatchMode::All
+            ),
             None
         );
         // 英文短词（非 CJK）不受影响，沿用既有行为。
         assert_eq!(
-            fts_match_from_groups(&[KeywordGroup::singleton("AI")]).as_deref(),
+            fts_match_from_groups(&[KeywordGroup::singleton("AI")], MatchMode::All).as_deref(),
             Some("\"AI\"")
         );
-    }
-
-    #[test]
-    fn fts_or_relax_flattens_all_terms_across_groups() {
-        // BETA-57：≥2 词组 → 所有词项摊平成单个 OR（组间 AND 放宽成 OR）。
-        assert_eq!(
-            fts_or_relax_from_groups(&[
-                KeywordGroup::singleton("体检报告"),
-                KeywordGroup::singleton("健康检查"),
-                KeywordGroup::singleton("健康体检"),
-            ])
-            .as_deref(),
-            Some("(\"体检报告\" OR \"健康检查\" OR \"健康体检\")")
-        );
-        // 组内同义词一并摊平进同一 OR。
-        assert_eq!(
-            fts_or_relax_from_groups(&[
-                group("会议纪要", &["会议记录"]),
-                KeywordGroup::singleton("季度报告"),
-            ])
-            .as_deref(),
-            Some("(\"会议纪要\" OR \"会议记录\" OR \"季度报告\")")
-        );
-        // 单个有效词组 → None（AND≡OR、兜底重试纯属重复查询）。
-        assert_eq!(
-            fts_or_relax_from_groups(&[KeywordGroup::singleton("体检报告")]),
-            None
-        );
-        // 短 CJK 词剔除后只剩 1 个有效词组 → None（与 fts_match_from_groups 同口径）。
-        assert_eq!(
-            fts_or_relax_from_groups(&[
-                KeywordGroup::singleton("体检"),
-                KeywordGroup::singleton("健康体检"),
-            ]),
-            None
-        );
-        assert_eq!(fts_or_relax_from_groups(&[]), None);
     }
 
     #[test]
@@ -1236,12 +1234,12 @@ mod tests {
         assert_eq!(hits3.len(), 1, "≥3 字正文词走 FTS 仍命中");
     }
 
-    /// BETA-57（2026-07-08 真机沉淀）：多词自然语言查询经生产 `search_expanded` 全链路——
-    /// parser 拆成多个词组、组间 AND 要求全部命中，一个词不在文档就整条 0 命中；AND 空时
-    /// 放宽成组间 OR 兜底重试，恢复召回。复现真机 bug：搜「体检 健康检查 健康体检」此前
-    /// 0 命中（体检报告正文无「健康检查」），OR 兜底后经其余词项命中。
+    /// 2026-07-20：全局 `MatchMode` 复合条件配置——替代 BETA-57 旧版「AND 0 命中静默放宽
+    /// 为 OR」的自动兜底。用户反馈该静默放宽会把只命中部分条件的结果当正常结果返回，造成
+    /// 大量噪音；现改为显式二选一：`All` 严格要求全部条件命中（0 就是 0，不再重试），
+    /// `Any` 任一条件命中即可，且从查询发起时就按该口径，不做二次查询。
     #[test]
-    fn search_expanded_and_zero_falls_back_to_or() {
+    fn search_expanded_all_mode_zero_hit_stays_zero_no_silent_relax() {
         let dir = tempfile::tempdir().unwrap();
         let docs = dir.path().join("docs");
         std::fs::create_dir_all(&docs).unwrap();
@@ -1271,27 +1269,37 @@ mod tests {
             KeywordGroup::singleton("健康检查"),
             KeywordGroup::singleton("健康体检"),
         ];
-        // 兜底前的 AND 表达式确为三词全需 → 与正文不符。
         assert_eq!(
-            fts_match_from_groups(&groups).as_deref(),
+            fts_match_from_groups(&groups, MatchMode::All).as_deref(),
             Some("\"体检报告\" AND \"健康检查\" AND \"健康体检\"")
         );
 
-        let exp = expanded(file_search(None), groups);
+        let mut exp = expanded(file_search(None), groups.clone());
+        exp.match_mode = MatchMode::All;
         let hits = backend.search_results_expanded(&exp).unwrap();
-        assert_eq!(hits.len(), 1, "AND 0 命中应经 OR 兜底命中体检报告");
-        assert!(hits[0].path.ends_with("体检报告.txt"));
+        assert!(
+            hits.is_empty(),
+            "All 模式严格要求全部条件命中，0 命中应保持 0，不再静默放宽为 OR"
+        );
 
-        // 对照：AND 本可命中的查询（两词都在正文）不触发兜底、行为不变、不误召无关文档。
-        let exp_ok = expanded(
+        // Any 模式：同一份词组显式选任一命中 → 恢复召回。
+        let mut exp_any = expanded(file_search(None), groups);
+        exp_any.match_mode = MatchMode::Any;
+        let hits_any = backend.search_results_expanded(&exp_any).unwrap();
+        assert_eq!(hits_any.len(), 1, "Any 模式应经其余词项命中体检报告");
+        assert!(hits_any[0].path.ends_with("体检报告.txt"));
+
+        // 对照：All 本可命中的查询（两词都在正文）不受影响。
+        let mut exp_ok = expanded(
             file_search(None),
             vec![
                 KeywordGroup::singleton("体检报告"),
                 KeywordGroup::singleton("健康体检"),
             ],
         );
+        exp_ok.match_mode = MatchMode::All;
         let hits_ok = backend.search_results_expanded(&exp_ok).unwrap();
-        assert_eq!(hits_ok.len(), 1, "AND 命中的查询保持精确、不受兜底影响");
+        assert_eq!(hits_ok.len(), 1, "All 命中的查询保持精确、行为不变");
         assert!(hits_ok[0].path.ends_with("体检报告.txt"));
     }
 
@@ -1319,7 +1327,7 @@ mod tests {
         let path = stored[0].entry.path.clone();
 
         // 提供与搜索同款的词组 FTS 表达式 → 命中片段含哨兵高亮。
-        let fts = fts_match_for_groups(&[KeywordGroup::singleton("季度预算")]);
+        let fts = fts_match_for_groups(&[KeywordGroup::singleton("季度预算")], MatchMode::All);
         let preview = backend
             .preview(&path, fts.as_deref())
             .unwrap()

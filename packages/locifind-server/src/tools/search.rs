@@ -255,7 +255,9 @@ impl Tool for SearchTool {
         }
 
         // 3) daemon FTS-only 关键词展开（multi-word phrase 拆 token，详函数注释）。
-        let expanded = expand_intent_for_daemon(intent);
+        // 2026-07-20：叠加启动期注入的全局复合条件匹配模式（daemon 无 settings.json，
+        // 一次性配置，见 `ServerConfig.match_mode`）。
+        let expanded = expand_intent_for_daemon(intent).with_match_mode(ctx.config.match_mode);
 
         // 4) 逐 collection 跑链（各自独立候选链 / 独立 db —— 物理信息墙），命中
         //    path → collection 建映射供 rank 后回标。

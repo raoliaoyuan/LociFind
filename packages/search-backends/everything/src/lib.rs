@@ -18,8 +18,8 @@ use locifind_search_backend::{
     backend_stream_from_results, intent_sort_order, media_common_constraints,
     media_derived_file_types, sort_results, BackendKind, BackendSearchFuture, BackendStream,
     CancellationToken, CommonConstraints, ExpandedSearchIntent, FileSearch, FileType,
-    ImplementationStatus, KeywordGroup, LocationResolver, MatchType, MediaSearch, MediaType,
-    Quality, RelativeTime, SearchBackend, SearchError, SearchIntent, SearchResult,
+    ImplementationStatus, KeywordGroup, LocationResolver, MatchMode, MatchType, MediaSearch,
+    MediaType, Quality, RelativeTime, SearchBackend, SearchError, SearchIntent, SearchResult,
     SearchResultMetadata, SizeExpression, SizeUnit, SortOrder, TimeExpression,
 };
 // 跨后端共用的小工具收拢在 common，后端按原名别名引入，调用点零改动。
@@ -459,12 +459,20 @@ where
     R: LocationResolver,
 {
     match &expanded.base {
-        SearchIntent::FileSearch(search) => {
-            translate_file_search_expanded(search, &expanded.keyword_groups, resolver, es_path)
-        }
-        SearchIntent::MediaSearch(search) => {
-            translate_media_search_expanded(search, &expanded.keyword_groups, resolver, es_path)
-        }
+        SearchIntent::FileSearch(search) => translate_file_search_expanded(
+            search,
+            &expanded.keyword_groups,
+            expanded.match_mode,
+            resolver,
+            es_path,
+        ),
+        SearchIntent::MediaSearch(search) => translate_media_search_expanded(
+            search,
+            &expanded.keyword_groups,
+            expanded.match_mode,
+            resolver,
+            es_path,
+        ),
         SearchIntent::Refine(_) | SearchIntent::FileAction(_) | SearchIntent::Clarify(_) => {
             Err(SearchError::UnsupportedIntent {
                 detail: "EverythingBackend only accepts merged file_search/media_search intents"
@@ -477,6 +485,7 @@ where
 fn translate_file_search_expanded<R>(
     search: &FileSearch,
     groups: &[KeywordGroup],
+    match_mode: MatchMode,
     resolver: &R,
     es_path: &Path,
 ) -> Result<EverythingCommand, SearchError>
@@ -484,7 +493,7 @@ where
     R: LocationResolver,
 {
     let mut builder = CommandBuilder::new(es_path.to_path_buf(), search.limit);
-    add_keyword_groups(&mut builder, groups);
+    add_keyword_groups(&mut builder, groups, match_mode);
     add_common_constraints(
         &mut builder,
         resolver,
@@ -507,6 +516,7 @@ where
 fn translate_media_search_expanded<R>(
     search: &MediaSearch,
     groups: &[KeywordGroup],
+    match_mode: MatchMode,
     resolver: &R,
     es_path: &Path,
 ) -> Result<EverythingCommand, SearchError>
@@ -514,7 +524,7 @@ where
     R: LocationResolver,
 {
     let mut builder = CommandBuilder::new(es_path.to_path_buf(), search.limit);
-    add_keyword_groups(&mut builder, groups);
+    add_keyword_groups(&mut builder, groups, match_mode);
     let file_types = media_derived_file_types(search);
     add_common_constraints(
         &mut builder,
@@ -525,11 +535,24 @@ where
     Ok(builder.finish(search.sort))
 }
 
-/// 每个 keyword 组：组内同义词用 `|` OR 展开成单个 `es.exe` term；组间靠默认空格 AND。
-/// singleton 组（无同义词）退化为裸词，与 `search` 路径的 `term(head)` byte-equal。
-fn add_keyword_groups(builder: &mut CommandBuilder, groups: &[KeywordGroup]) {
-    for group in groups.iter().filter(|group| !group.head.is_empty()) {
-        builder.keyword_group_term(&group.all());
+/// 每个 keyword 组按全局 `match_mode` 译成 `es.exe` term：
+/// - [`MatchMode::All`]（默认，全部复合条件命中）：组内同义词 `|` OR 展开成单个 term，
+///   组间靠默认空格 AND（与旧行为一致）。singleton 组退化为裸词，与 `search` 路径的
+///   `term(head)` byte-equal。
+/// - [`MatchMode::Any`]（任一条件命中）：所有词组的全部词项摊平进**单个** `<...>` OR
+///   term——`es.exe` 多个独立参数默认空格 AND，要表达「组间 OR」必须合并成一个 term。
+fn add_keyword_groups(
+    builder: &mut CommandBuilder,
+    groups: &[KeywordGroup],
+    match_mode: MatchMode,
+) {
+    match match_mode {
+        MatchMode::All => {
+            for group in groups.iter().filter(|group| !group.head.is_empty()) {
+                builder.keyword_group_term(&group.all());
+            }
+        }
+        MatchMode::Any => builder.keyword_groups_term_any(groups),
     }
 }
 
@@ -684,6 +707,23 @@ impl CommandBuilder {
             .filter(|term| !term.contains('\0') && !term.contains('\n'))
             .collect();
         match safe.as_slice() {
+            [] => {}
+            [single] => self.args.push((*single).to_owned()),
+            many => self.args.push(format!("<{}>", many.join("|"))),
+        }
+    }
+
+    /// [`MatchMode::Any`] 用：把所有词组的全部词项（不分组边界）摊平进单个 `<...>` OR
+    /// term——`es.exe` 无「组间 OR」原生语法，多个独立参数默认空格 AND，故需合并成一个
+    /// term 才能表达「任一条件命中」。单个有效词项退化为裸词（与 `term` byte-equal）。
+    fn keyword_groups_term_any(&mut self, groups: &[KeywordGroup]) {
+        let all_terms: Vec<&str> = groups
+            .iter()
+            .filter(|group| !group.head.is_empty())
+            .flat_map(KeywordGroup::all)
+            .filter(|term| !term.contains('\0') && !term.contains('\n'))
+            .collect();
+        match all_terms.as_slice() {
             [] => {}
             [single] => self.args.push((*single).to_owned()),
             many => self.args.push(format!("<{}>", many.join("|"))),
@@ -1310,6 +1350,7 @@ mod tests {
                 head: "工作汇报".to_owned(),
                 synonyms: vec!["述职".to_owned(), "工作总结".to_owned()],
             }],
+            match_mode: MatchMode::default(),
         };
 
         let command =
@@ -1329,6 +1370,41 @@ mod tests {
             .all(|arg| !arg.contains('\n') && !arg.contains('\0')));
     }
 
+    /// 2026-07-20：`MatchMode::Any` 下多个词组应摊平进单个 `<...>` OR term，而非默认空格
+    /// AND（`es.exe` 无原生「组间 OR」语法，必须合并成一个 term 才能表达任一条件命中）。
+    #[test]
+    fn expanded_any_mode_flattens_groups_into_single_or_term() {
+        let base: SearchIntent = serde_json::from_value(serde_json::json!({
+            "schema_version": "1.0",
+            "intent": "file_search",
+            "keywords": ["工作汇报", "季度"]
+        }))
+        .unwrap();
+        let expanded = ExpandedSearchIntent {
+            base,
+            keyword_groups: vec![
+                KeywordGroup::singleton("工作汇报"),
+                KeywordGroup::singleton("季度"),
+            ],
+            match_mode: MatchMode::Any,
+        };
+
+        let command =
+            translate_intent_expanded(&expanded, &MockResolver, Path::new("es.exe")).unwrap();
+
+        // 两个词组摊平进同一个 <a|b> term，而不是两个独立参数（独立参数会被 es.exe 按空格 AND）。
+        assert!(
+            command.args.iter().any(|arg| arg == "<工作汇报|季度>"),
+            "Any 模式应把词组摊平进单个 OR term: {:?}",
+            command.args
+        );
+        assert!(
+            !command.args.iter().any(|arg| arg == "工作汇报"),
+            "不应再有独立的裸词参数（会被空格 AND）: {:?}",
+            command.args
+        );
+    }
+
     #[test]
     fn expanded_singleton_group_matches_plain_keyword_translation() {
         let base: SearchIntent = serde_json::from_value(serde_json::json!({
@@ -1340,6 +1416,7 @@ mod tests {
         let expanded = ExpandedSearchIntent {
             base: base.clone(),
             keyword_groups: vec![KeywordGroup::singleton("报告")],
+            match_mode: MatchMode::default(),
         };
 
         let plain = translate_intent(&base, &MockResolver, Path::new("es.exe")).unwrap();
@@ -1372,6 +1449,7 @@ mod tests {
                 head: "工作汇报".to_owned(),
                 synonyms: vec!["述职".to_owned()],
             }],
+            match_mode: MatchMode::default(),
         };
 
         let stream =
