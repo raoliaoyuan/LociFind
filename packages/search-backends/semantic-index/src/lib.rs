@@ -33,8 +33,8 @@ use locifind_indexer::vectors::cosine;
 use locifind_indexer::DocumentIndex;
 use locifind_search_backend::{
     backend_stream_from_results, BackendKind, BackendSearchFuture, CancellationToken,
-    ExpandedSearchIntent, MatchType, MediaType, SearchBackend, SearchError, SearchIntent,
-    SearchResult, SearchResultMetadata,
+    ExpandedSearchIntent, KeywordGroup, MatchMode, MatchType, MediaType, SearchBackend,
+    SearchError, SearchIntent, SearchResult, SearchResultMetadata,
 };
 // result_id 与三系统后端 + LocalIndexBackend 共用 common 的单一实现，保证跨源去重 ID 口径一致。
 use locifind_search_backend::result_id_for_path as result_id;
@@ -195,6 +195,92 @@ impl SemanticIndexBackend {
             .collect())
     }
 
+    /// 2026-07-20：复合条件语义检索——按 `match_mode` 对 `keyword_groups` 做语义层面的
+    /// AND/OR，而不是把所有关键词拼成一句整体 embed（旧行为丢失"这是几个独立条件"的
+    /// 结构、导致「全部命中」模式下语义臂可能只贴合其中一个条件就把文档召回，绕开了
+    /// FTS 臂的严格 AND）。
+    ///
+    /// 做法：每个词组（含同义词）**各自** embed 组内每个词，取该组对候选文档的**最大**
+    /// cosine（组内 OR，同义词命中任一即算这个条件满足，语义近似词天然也算，如"研发部"
+    /// 命中"开发部"这个条件）；再按 `match_mode` 汇总多个条件的分数：`All` 取**最小值**
+    /// （每个条件都必须过关，一票否决）、`Any` 取**最大值**（任一条件过关即可，与现状
+    /// 单一整句 embed 的召回宽松度相当）。
+    ///
+    /// **词组数 < 2 时沿用 [`Self::search_results`] 的整句 embed 行为**（单条件查询下
+    /// `All`/`Any` 本就语义等价，拆分只会多算不换取任何额外精确性）。
+    pub fn search_results_expanded(
+        &self,
+        expanded: &ExpandedSearchIntent,
+    ) -> Result<Vec<SearchResult>, SearchError> {
+        let valid_groups: Vec<&KeywordGroup> = expanded
+            .keyword_groups
+            .iter()
+            .filter(|g| !g.head.trim().is_empty())
+            .collect();
+        if valid_groups.len() < 2 {
+            return self.search_results(&expanded.base);
+        }
+
+        let Some(embedder) = self.embedder.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let Some((_, images_only)) = Self::query_spec(&expanded.base) else {
+            return Ok(Vec::new());
+        };
+        if !self.db_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        // 逐组把组内每个词（head + 同义词）各 embed 一次；组数/词数通常个位数，
+        // embed 调用开销可忽略——真正的暴力扫描（cosine × 全部文档向量）在下面才发生。
+        let mut group_vecs: Vec<Vec<Vec<f32>>> = Vec::with_capacity(valid_groups.len());
+        for group in &valid_groups {
+            let mut vecs = Vec::new();
+            for term in group.all() {
+                let term = term.trim();
+                if term.is_empty() {
+                    continue;
+                }
+                vecs.push(embedder.embed(term).map_err(to_search_err)?);
+            }
+            group_vecs.push(vecs);
+        }
+
+        let groups = self.load_groups()?;
+        let groups = groups.as_ref();
+        let floor = (self.floor_provider)();
+        let match_mode = expanded.match_mode;
+
+        let scored: Vec<(f32, String)> = groups
+            .iter()
+            .filter_map(|doc_group| {
+                let path = doc_group.paths.first()?;
+                if images_only && !Self::is_image_path(path) {
+                    return None;
+                }
+                // 组内 OR：该条件对本文档的分数 = 组内各词 cosine 的最大值。
+                let per_condition_scores = group_vecs.iter().map(|term_vecs| {
+                    term_vecs
+                        .iter()
+                        .map(|qv| cosine(qv, &doc_group.vector))
+                        .fold(f32::MIN, f32::max)
+                });
+                // 组间按 match_mode 汇总：All 取最小值（一票否决）、Any 取最大值。
+                let combined = match match_mode {
+                    MatchMode::All => per_condition_scores.fold(f32::MAX, f32::min),
+                    MatchMode::Any => per_condition_scores.fold(f32::MIN, f32::max),
+                };
+                Some((combined, path.clone()))
+            })
+            .collect();
+
+        let scored = filter_rank_topk(scored, floor, TOP_K);
+        Ok(scored
+            .into_iter()
+            .map(|(score, path)| vector_hit_to_result(&path, score))
+            .collect())
+    }
+
     /// 取当前身份分组：缓存签名（db mtime + 向量行数）未变则复用驻留副本，否则重载并归组。
     /// 归组 = 按 `content_hash` 聚合（相同身份合一组、代表向量取首见，副本 path 随组保留）；
     /// `content_hash=None` 的候选各自独立成组（不去重）。
@@ -285,14 +371,19 @@ impl SearchBackend for SemanticIndexBackend {
         })
     }
 
-    /// 语义臂不消费 keyword_groups（同义词/gazetteer 由 FTS 臂覆盖；语义召回靠向量近邻
-    /// 天然吸收同义/近义），故直接走 base intent。
+    /// 2026-07-20：复合条件（≥2 有效词组）时按 `match_mode` 做逐条件语义 AND/OR
+    /// （见 [`Self::search_results_expanded`]）；单条件/无条件时与旧行为一致，直接走
+    /// base intent 整句 embed（同义词/gazetteer 由 FTS 臂覆盖，语义召回靠向量近邻
+    /// 天然吸收同义/近义，此时拆分无额外收益）。
     fn search_expanded<'a>(
         &'a self,
         expanded: &'a ExpandedSearchIntent,
         cancel: CancellationToken,
     ) -> BackendSearchFuture<'a> {
-        self.search(&expanded.base, cancel)
+        Box::pin(async move {
+            let results = self.search_results_expanded(expanded)?;
+            Ok(backend_stream_from_results(results, cancel))
+        })
     }
 }
 
@@ -410,6 +501,87 @@ mod tests {
         assert_eq!(results[0].match_type, MatchType::Semantic);
         // cat 与查询同轴 → cosine ≈ 1；dog 正交 → ≈ 0。
         assert!(results[0].score.unwrap() > results[1].score.unwrap());
+    }
+
+    /// 2026-07-20：复合条件（2 词组：「猫」「狗」）+ `MatchMode::All`——只有**同时**
+    /// 沾猫又沾狗的文档才应通过（一票否决语义）；纯猫 / 纯狗文档在另一个条件上的 cosine
+    /// 接近 0、被 floor 挡在外面。`MatchMode::Any` 下三份文档应全部通过（任一条件即可）。
+    #[test]
+    fn expanded_all_mode_requires_every_group_any_mode_requires_one() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("cat.txt"), "关于猫的笔记").unwrap();
+        std::fs::write(dir.path().join("dog.txt"), "关于狗的笔记").unwrap();
+        std::fs::write(dir.path().join("both.txt"), "猫和狗都有的笔记").unwrap();
+        let db = dir.path().join("index.db");
+        let idx = DocumentIndex::open(&db).unwrap();
+        idx.index_dirs(&[dir.path().to_path_buf()]).unwrap();
+
+        let cat = dir.path().join("cat.txt").to_string_lossy().into_owned();
+        let dog = dir.path().join("dog.txt").to_string_lossy().into_owned();
+        let both = dir.path().join("both.txt").to_string_lossy().into_owned();
+        // AxisEmbedder：猫→x轴[1,0]，狗→y轴[0,1]。cat 纯 x、dog 纯 y、both 两轴都占。
+        assert!(idx.upsert_vector(&cat, &[1.0, 0.0], "axis", "h1").unwrap());
+        assert!(idx.upsert_vector(&dog, &[0.0, 1.0], "axis", "h2").unwrap());
+        assert!(idx.upsert_vector(&both, &[1.0, 1.0], "axis", "h3").unwrap());
+
+        let backend = SemanticIndexBackend::new(
+            &db,
+            Some(Arc::new(AxisEmbedder)),
+            std::sync::Arc::new(|| 0.30_f32),
+        );
+        let groups = vec![KeywordGroup::singleton("猫"), KeywordGroup::singleton("狗")];
+
+        let expanded_all = ExpandedSearchIntent {
+            base: file_search("猫 狗"),
+            keyword_groups: groups.clone(),
+            match_mode: MatchMode::All,
+        };
+        let all_results = backend.search_results_expanded(&expanded_all).unwrap();
+        let all_names: Vec<&str> = all_results.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(
+            all_names,
+            vec!["both.txt"],
+            "All 模式只有同时沾猫又沾狗的文档应通过一票否决：{all_names:?}"
+        );
+
+        let expanded_any = ExpandedSearchIntent {
+            base: file_search("猫 狗"),
+            keyword_groups: groups,
+            match_mode: MatchMode::Any,
+        };
+        let any_results = backend.search_results_expanded(&expanded_any).unwrap();
+        assert_eq!(
+            any_results.len(),
+            3,
+            "Any 模式任一条件命中即可，三份文档都应通过：{any_results:?}"
+        );
+    }
+
+    /// 单个有效词组（或全 singleton 未扩词也只剩 1 组）时应退化为 `search_results` 的整句
+    /// embed 行为，`match_mode` 不产生任何影响（省一次多余的逐组 embed/cosine）。
+    #[test]
+    fn expanded_single_group_falls_back_to_plain_search_results() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("cat.txt"), "关于猫的笔记").unwrap();
+        let db = dir.path().join("index.db");
+        let idx = DocumentIndex::open(&db).unwrap();
+        idx.index_dirs(&[dir.path().to_path_buf()]).unwrap();
+        let cat = dir.path().join("cat.txt").to_string_lossy().into_owned();
+        assert!(idx.upsert_vector(&cat, &[1.0, 0.2], "axis", "h1").unwrap());
+
+        let backend = SemanticIndexBackend::new(
+            &db,
+            Some(Arc::new(AxisEmbedder)),
+            std::sync::Arc::new(|| 0.30_f32),
+        );
+        let expanded = ExpandedSearchIntent {
+            base: file_search("我家的猫"),
+            keyword_groups: vec![KeywordGroup::singleton("我家的猫")],
+            match_mode: MatchMode::All,
+        };
+        let results = backend.search_results_expanded(&expanded).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "cat.txt");
     }
 
     /// 构造 MediaSearch intent（走 serde internally-tagged 反序列化，免平铺全部字段）。
