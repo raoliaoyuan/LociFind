@@ -6,9 +6,9 @@
 
 ## 📍 速览
 
-- **阶段**：B（Beta）进行中（**BETA-63 多复合条件检索全局匹配模式（AND/OR 可选）**+ 语义臂补丁随 **v0.9.32 双平台已发布 ✅**，语义臂补丁待发下一版；v0.9.27~31 详见会话日志）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
+- **阶段**：B（Beta）进行中（**BETA-63 多复合条件检索全局匹配模式（AND/OR 可选）**+ 语义臂逐条件补丁随 **v0.9.33 双平台已发布 ✅**；v0.9.27~31 详见会话日志）；P ✅ / M 代码层 ✅ / M→B 正式切换仍待 §8 长周期项；**§6「总体 evals >90%」本机 parser-only 已达 99.4%（v0.9 994/6/0、fail=0）**，出场判定余双平台真机复跑。
 - **定位**：**开源免费**（2026-07-04 拍板，MIT OR Apache-2.0 双许可）本地语义检索底座——个人桌面搜索 + 企业冷归档检索（律所卷宗 / 内部审计 / 离职归档三场景）；**不做分析层**，分析经 MCP daemon + 外部 LLM 组合。以 [PROJECT.md](./PROJECT.md) 为准。
-- **当前 task**：**2026-07-20 BETA-63 补充：语义召回臂逐条件 AND/OR**——用户装 v0.9.32 真机测试后反馈"全部命中"仍返回单条件匹配的结果（如「2025年 开发部 述职报告」只要命中"述职报告"就返回）。复盘定位到**第二个独立根因**：语义（embedding）召回臂完全不消费 `keyword_groups`/`match_mode`，把多个关键词整句拼接 embed 成一个向量做相似度召回，天然没有"每个条件都要满足"的概念，RRF 融合时会把只贴合其中一个条件的文档也带入最终结果。**产出**：`SemanticIndexBackend` 新增 `search_results_expanded`——≥2 个有效词组时，逐词组（含同义词，组内取最大 cosine）分别 embed 算相似度，按 `match_mode` 汇总（`All` 取最小值一票否决、`Any` 取最大值），单/零词组时零变化仍走整句 embed。测试：semantic-index 新增 2 个用例（All 一票否决 + 单词组零变化）验证，25 个测试全绿；下游 harness/server/desktop 无回归。**v0.9.32 双平台已发布 ✅**（2026-07-20）；本补丁待发下一版。
+- **当前 task**：**2026-07-20 BETA-63 补充：语义召回臂逐条件 AND/OR**——用户装 v0.9.32 真机测试后反馈"全部命中"仍返回单条件匹配的结果（如「2025年 开发部 述职报告」只要命中"述职报告"就返回）。复盘定位到**第二个独立根因**：语义（embedding）召回臂完全不消费 `keyword_groups`/`match_mode`，把多个关键词整句拼接 embed 成一个向量做相似度召回，天然没有"每个条件都要满足"的概念，RRF 融合时会把只贴合其中一个条件的文档也带入最终结果。**产出**：`SemanticIndexBackend` 新增 `search_results_expanded`——≥2 个有效词组时，逐词组（含同义词，组内取最大 cosine）分别 embed 算相似度，按 `match_mode` 汇总（`All` 取最小值一票否决、`Any` 取最大值），单/零词组时零变化仍走整句 embed。测试：semantic-index 新增 2 个用例（All 一票否决 + 单词组零变化）验证，25 个测试全绿；下游 harness/server/desktop 无回归。**v0.9.33 双平台已发布 ✅**（2026-07-20）。
 - **下一步 top-3**：① **设计伙伴/首个真实部署主动获取**（护城河 P0，ROADMAP §5；BETA-40 真实内网证据/BETA-44 语料扩充均以此为前提）；② **macOS 真机整体待跑**（出场线 Class A 唯一剩项；**v0.9.23 macOS DMG 已产出、具备真机测试前提**；Windows 真机 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)）；③ BETA-53 可选复核：真 Claude Code 进程连 `~/.claude/settings.json` 走一遍（[playbook](docs/reviews/beta-53-mcp-service-manual-verify.md)）。
 - **阻塞**：Class A 仅剩**双平台 evals 真机**（Apple Developer / 证书·域名·商标已随 2026-07-04 开源免费拍板取消）；**Class B 归零**（音乐全盘发现语义 2026-07-06 方案 A〔按 roots 过滤〕拍板并落地）。
 
@@ -21,7 +21,7 @@
 1. **BETA-53 剩余真机项**（功能级 + 真机 GUI 全流程已验，[报告](docs/reviews/beta-53-mcp-service-verify-2026-07-07.md)：harness 跑通 §2/§3/§4 + computer-use 驱动 dev app 实点——菜单/tab 路由·开关联动后端起停·token/配置片段复制·自启·旧设置迁移·对实跑 app curl 全通过）：**仅剩** ① 真 Claude Code 进程实连（协议已 curl 验过）、② 语义命中（`semantic-recall` 构建路径 B）——均依赖用户。
 2. **设计伙伴 / 首个真实部署获取**（护城河 P0，ROADMAP §5）：BETA-40 真实内网证据、BETA-44 真实语料扩充、场景词表积累均以此为前提——主动获取（律所/审计/离职归档任一场景即可）。
 3. **真机验证剩余项**（Windows 10 项已过，[报告](docs/reviews/beta-manual-verify-2026-07-07-windows.md)：BETA-47/50/51/52/29〔v1+v2〕/33〔单实例锁·设置流〕 + 基础搜索 + BETA-12 卸载·升级）——**Windows 仅剩**：BETA-49 音乐发现不越界（依赖目录配置）、BETA-43 出处/`read_document`/审计导出（[playbooks README](docs/playbooks/README.md) 第 8/9 条，需 daemon + 外部 LLM；**其中 `read_document` 正斜杠 root round-trip bug 本轮已修**）、BETA-33 cycle 9 WSearch 状态条 / 全库-概貌口径差；**macOS 整体待跑**（按 [manual-test-scenarios](docs/manual-test-scenarios.md)）。
-4. **发版进度**：…→ **v0.9.30**（热修内嵌 MCP 端口竞态：`AddrInUse` 有界重试，2026-07-09 已发布）→ **v0.9.31**（BETA-61 自动增量索引 + BETA-62 MCP 索引中提示，2026-07-10 双平台已发布 ✅ 含 changelog）→ **v0.9.32**（BETA-63 多复合条件检索全局匹配模式，2026-07-20 **双平台已发布 ✅** 含 changelog）。并发机制累计稳。
+4. **发版进度**：…→ **v0.9.31**（BETA-61 自动增量索引 + BETA-62 MCP 索引中提示，2026-07-10 双平台已发布 ✅ 含 changelog）→ **v0.9.32**（BETA-63 多复合条件检索全局匹配模式，2026-07-20 双平台已发布 ✅ 含 changelog）→ **v0.9.33**（BETA-63 补充：语义召回臂逐条件 AND/OR，2026-07-20 **双平台已发布 ✅** 含 changelog）。并发机制累计稳。
 5. **BETA-10 剩余**：macOS DMG 产物 CI done 且 **v0.9.15 首验通过**；剩 macOS 真机放行验证（§6.3）；winget 待 BETA-14 后 / Homebrew tap 可启动（DMG CI 已跑通）。
 6. **BETA-40 真实内网证据**：唯一剩余验收项，依赖 ②。
 7. **剩余 6 条 partial**（不阻塞出场线，[beta-exit §3.4](docs/reviews/beta-exit.md)）：全为 v0.5 标注锁定项（markdown ft / 「上个月下载的」动词歧义 / 项目归档 location / downloads hint 双语 ×2，改标注吃 §6.5 豁免额度）+ 备份文件两难。parser 可确定性收割已见底。
