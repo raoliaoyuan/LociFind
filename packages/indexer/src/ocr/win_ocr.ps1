@@ -29,6 +29,9 @@ function Await($WinRtTask, $ResultType) {
 
 [Windows.Storage.StorageFile,Windows.Storage,ContentType=WindowsRuntime] | Out-Null
 [Windows.Graphics.Imaging.BitmapDecoder,Windows.Graphics.Imaging,ContentType=WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.BitmapTransform,Windows.Graphics.Imaging,ContentType=WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.ExifOrientationMode,Windows.Graphics.Imaging,ContentType=WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.ColorManagementMode,Windows.Graphics.Imaging,ContentType=WindowsRuntime] | Out-Null
 [Windows.Media.Ocr.OcrEngine,Windows.Media.Ocr,ContentType=WindowsRuntime] | Out-Null
 
 $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
@@ -37,7 +40,28 @@ if ($null -eq $engine) { [Console]::Error.WriteLine('no OCR recognizer language 
 $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($img)) ([Windows.Storage.StorageFile])
 $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
 $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
-$bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+
+# 超大图（宽或高 > OcrEngine.MaxImageDimension）RecognizeAsync 会直接报
+# "The parameter is incorrect."。等比缩到上限内再识别，而不是整图计 failed。
+$maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension
+$origW = $decoder.PixelWidth
+$origH = $decoder.PixelHeight
+if ($origW -gt $maxDim -or $origH -gt $maxDim) {
+    $scale = [Math]::Min([double]$maxDim / $origW, [double]$maxDim / $origH)
+    $transform = New-Object Windows.Graphics.Imaging.BitmapTransform
+    $transform.ScaledWidth = [uint32][Math]::Max(1.0, [Math]::Floor($origW * $scale))
+    $transform.ScaledHeight = [uint32][Math]::Max(1.0, [Math]::Floor($origH * $scale))
+    $bitmap = Await ($decoder.GetSoftwareBitmapAsync(
+        $decoder.BitmapPixelFormat,
+        $decoder.BitmapAlphaMode,
+        $transform,
+        [Windows.Graphics.Imaging.ExifOrientationMode]::RespectExifOrientation,
+        [Windows.Graphics.Imaging.ColorManagementMode]::DoNotColorManage
+    )) ([Windows.Graphics.Imaging.SoftwareBitmap])
+} else {
+    $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+}
+
 $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
 [Console]::Out.Write($result.Text)
 exit 0

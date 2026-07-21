@@ -78,6 +78,37 @@ fn has_ext(path: &Path, exts: &[&str]) -> bool {
         .is_some_and(|ext| exts.contains(&ext.as_str()))
 }
 
+/// Office（Word/Excel/PowerPoint）打开文档期间在同目录生成的隐藏锁文件
+/// （固定前缀 `~$`，如 `~$报告.docx`）：内容是几百字节的 owner-info 占位数据，
+/// 不是合法 zip/OOXML。当作正常 docx/xlsx/pptx 提取会必然报
+/// `invalid Zip archive: Could not find EOCD`，误计一条 failed
+/// （用户反馈复现，推断为常开 Office 文档时索引批量命中此报错——待真机复测确认）。
+/// `~$` 前缀是 Office 固定约定、不会出现在真实文档文件名首两字符，按 basename 跳过安全。
+fn is_office_lock_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("~$"))
+}
+
+#[cfg(test)]
+mod office_lock_file_tests {
+    use super::*;
+
+    #[test]
+    fn detects_office_lock_file_prefix() {
+        assert!(is_office_lock_file(Path::new("/docs/~$报告.docx")));
+        assert!(is_office_lock_file(Path::new(r"C:\docs\~$Report.xlsx")));
+        assert!(is_office_lock_file(Path::new("~$slides.pptx")));
+    }
+
+    #[test]
+    fn keeps_normal_documents() {
+        assert!(!is_office_lock_file(Path::new("/docs/报告.docx")));
+        assert!(!is_office_lock_file(Path::new("/docs/$budget.xlsx")));
+        assert!(!is_office_lock_file(Path::new("/docs/report~1.docx")));
+    }
+}
+
 /// 把目录名 glob 编译成 basename 匹配的 GlobSet。非法 glob 跳过 + 记日志，不中断。
 /// 空输入 → 空 GlobSet（is_match 恒 false → 无排除）。
 ///
@@ -313,6 +344,9 @@ where
                 continue;
             }
             let path = entry.path();
+            if is_office_lock_file(path) {
+                continue;
+            }
             if !has_ext(path, exts) {
                 continue;
             }

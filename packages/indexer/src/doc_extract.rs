@@ -213,6 +213,25 @@ fn combine_authors(creator: Option<String>, last_modified_by: Option<String>) ->
     }
 }
 
+/// OLE2/复合文档容器（CFB）文件签名。加密 OOXML（Word/Excel/PowerPoint 设了打开密码）
+/// 用此容器包一层 `EncryptedPackage` 流，本身不是 zip；旧版二进制 `.doc`/`.xls`/`.ppt`
+/// 误加 `.docx`/`.xlsx`/`.pptx` 扩展名同样是此签名。命中即可判定"非 zip 的具体原因"，
+/// 不需要真解出是否加密。
+const CFB_SIGNATURE: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+
+/// `zip::ZipArchive::new` 失败时的诊断 detail：CFB 容器（加密文档 / 老版二进制格式）
+/// 给可读原因，其余（截断 / 非 office 文件）保留原始 zip 报错文本。
+fn zip_open_err_detail(path: &Path, raw: &str) -> String {
+    let Ok(mut f) = fs::File::open(path) else {
+        return raw.to_string();
+    };
+    let mut head = [0u8; 8];
+    if f.read_exact(&mut head).is_ok() && head == CFB_SIGNATURE {
+        return "文档疑似已加密或为旧版二进制格式（非 OOXML zip），无法读取正文".to_string();
+    }
+    raw.to_string()
+}
+
 /// 从路径按 OOXML zip 读 `docProps/core.xml`（xlsx 走 calamine 不暴露 core props，另开 zip 补）。
 /// 非 zip（老 .xls BIFF）/ 无 core.xml（.ods 用 meta.xml）→ 降级 `(None, None)`，不阻断索引。
 fn read_ooxml_core_props_from_path(path: &Path) -> (Option<String>, Option<String>) {
@@ -227,7 +246,8 @@ fn read_ooxml_core_props_from_path(path: &Path) -> (Option<String>, Option<Strin
 
 fn extract_docx(path: &Path) -> Result<Extracted, IndexError> {
     let file = fs::File::open(path).map_err(|e| tag_err(path, e.to_string()))?;
-    let mut zip = zip::ZipArchive::new(file).map_err(|e| tag_err(path, e.to_string()))?;
+    let mut zip = zip::ZipArchive::new(file)
+        .map_err(|e| tag_err(path, zip_open_err_detail(path, &e.to_string())))?;
     let xml = read_zip_entry(&mut zip, "word/document.xml")
         .ok_or_else(|| tag_err(path, "缺少 word/document.xml"))?;
     let body = collect_xml_text(&xml, &[]);
@@ -237,7 +257,8 @@ fn extract_docx(path: &Path) -> Result<Extracted, IndexError> {
 
 fn extract_pptx(path: &Path) -> Result<Extracted, IndexError> {
     let file = fs::File::open(path).map_err(|e| tag_err(path, e.to_string()))?;
-    let mut zip = zip::ZipArchive::new(file).map_err(|e| tag_err(path, e.to_string()))?;
+    let mut zip = zip::ZipArchive::new(file)
+        .map_err(|e| tag_err(path, zip_open_err_detail(path, &e.to_string())))?;
 
     // 收集 ppt/slides/slideN.xml（排除 slideLayout / slideMaster / notesSlide）。
     let slide_names: Vec<String> = (0..zip.len())
@@ -646,6 +667,39 @@ mod tests {
         // 仅创建者、无最后保存者 → author = 创建者（combine 单侧回归）。
         assert_eq!(entry.author.as_deref(), Some("李四"));
         assert!(body.contains("季度预算分析"));
+    }
+
+    #[test]
+    fn extract_docx_cfb_container_reports_encrypted_hint() {
+        // 加密 docx / 老版二进制 .doc 误加 .docx 扩展名 → OLE2/CFB 容器，非 zip。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("encrypted.docx");
+        let mut bytes = CFB_SIGNATURE.to_vec();
+        bytes.extend_from_slice(&[0u8; 32]); // 补足字节，签名判定只看开头 8 字节。
+        fs::write(&path, &bytes).unwrap();
+
+        let err = extract_document(&path, 0).unwrap_err();
+        let IndexError::Tag { detail, .. } = err else {
+            panic!("expected Tag error, got {err:?}");
+        };
+        assert!(
+            detail.contains("加密"),
+            "CFB 容器应给出加密/旧格式提示而非原始 zip 报错，实得: {detail:?}"
+        );
+    }
+
+    #[test]
+    fn extract_docx_plain_corrupt_file_keeps_raw_zip_error() {
+        // 非 CFB 的随意损坏内容（如截断下载）→ 仍走原始 zip 报错文本，不误判成加密。
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("truncated.docx");
+        fs::write(&path, b"not a zip at all").unwrap();
+
+        let err = extract_document(&path, 0).unwrap_err();
+        let IndexError::Tag { detail, .. } = err else {
+            panic!("expected Tag error, got {err:?}");
+        };
+        assert!(!detail.contains("加密"), "非 CFB 文件不应判成加密, 实得: {detail:?}");
     }
 
     #[test]

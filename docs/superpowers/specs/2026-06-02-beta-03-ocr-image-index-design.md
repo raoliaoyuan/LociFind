@@ -163,4 +163,4 @@ SearchIntent::MediaSearch(m) if matches!(m.media_type, MediaType::Image | MediaT
 | 逐文件 PowerShell 启动慢（~0.5-1s/图） | mtime 增量重跑秒级 + BETA-07 后台非阻塞；批量留后续 |
 | 坏图 / 解码失败 / 引擎 panic | `recognize` 返 Err 计 failed + `run_incremental_index` 的 `catch_unwind` 兜 panic，不崩整轮 |
 | 注入（图片路径含特殊字符） | 路径经环境变量传入、脚本不插值（照搬 ADODB）；tesseract 走结构化参数 |
-| 超大图（>10000px，WinRT MaxImageDimension） | 超限 → 引擎返错计 failed；v1 不做缩放（留后续） |
+| 超大图（宽/高 > WinRT MaxImageDimension） | 真机实锤「The parameter is incorrect. Image dimensions are too large!」→ `win_ocr.ps1` 解码时按 `OcrEngine.MaxImageDimension` 等比缩放（`BitmapTransform` + 缩放版 `GetSoftwareBitmapAsync`）后再识别 |

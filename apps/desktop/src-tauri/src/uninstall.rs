@@ -4,12 +4,17 @@
 //! 用户同义词库（`user-synonyms.yaml`，卡片明示必清）；**保留配置**（`settings.json` 与
 //! onboarding 状态不动，重装后设置仍在）。
 //!
-//! 两条清理路径的分工：
+//! 两条清理路径的分工（**语义不同、不是同一份清单的两处实现**）：
 //! - **Windows 安装版**：真正的卸载走 NSIS 卸载器，由 `nsis/uninstall-hooks.nsh`
-//!   （`tauri.conf.json > bundle.windows.nsis.installerHooks` 挂载）在卸载器里执行同等清理——
-//!   届时 app 已退出、无文件占用，且带 `$UpdateMode` 守卫（版本升级绝不清数据）。
-//! - **本命令**：覆盖 macOS（DMG 拖拽卸载无卸载器）、Windows 便携版、以及「卸载前手动清理」
-//!   场景。删除前先 [`unload`](crate::search::embedding_model::EmbeddingModelHandle::unload)
+//!   （`tauri.conf.json > bundle.windows.nsis.installerHooks` 挂载）在卸载器里执行清理——
+//!   届时 app 已退出、无文件占用；带 `$UpdateMode` 守卫（版本升级绝不清数据），且模型 +
+//!   索引（index.db 及 -wal/-shm）默认都保留（询问一次，静默卸载 `/SD IDNO` = 保留）——
+//!   覆盖「先卸载旧版再装新版」这类手动两步操作，重装后无需重新下载模型 / 全量重扫索引。
+//! - **本命令**：用户在「隐私」页主动点「卸载清理」——**全删**（含索引、含模型），是
+//!   「彻底清空我的本机数据」的显式动作，与 NSIS 路径「卸载是为了重装、想留着索引接着用」
+//!   语义相反，不做同等保留。覆盖 macOS（DMG 拖拽卸载无卸载器）、Windows 便携版、以及
+//!   「真要卸载前先手动清一遍」场景。删除前先
+//!   [`unload`](crate::search::embedding_model::EmbeddingModelHandle::unload)
 //!   常驻模型释放 GGUF 文件句柄（Windows 上 mmap 中的模型文件删不掉）。
 //!   当天的 `locifind.log` 仍被 tracing-appender 持有，但 Rust std 打开文件默认带
 //!   `FILE_SHARE_DELETE`、删除可成功（后续写入落在已删除的 inode 上，跨日自然滚新文件）。
@@ -418,6 +423,27 @@ mod tests {
         assert!(
             content.contains("/SD IDNO"),
             "hook 的模型删除询问必须带 /SD IDNO（静默卸载默认保留模型、不挂弹窗）"
+        );
+        // 索引默认保留（用户反馈拍板）：「先卸载旧版再装新版」这类手动两步操作，
+        // hook 必须像保留模型一样把 index.db（+ -wal/-shm）暂存 Rename 出来再整目录删、
+        // 移回——否则每次手动重装都逼一次小时级全量重扫。
+        assert!(
+            directive_lines
+                .iter()
+                .any(|l| l.contains("Rename") && l.contains("index.db\" ")),
+            "hook 应含 index.db 暂存 Rename（默认保留索引、避免手动重装后全量重扫）"
+        );
+        assert!(
+            directive_lines
+                .iter()
+                .any(|l| l.contains("Rename") && l.contains("index.db-wal")),
+            "hook 应连带保留 index.db-wal 兄弟文件"
+        );
+        assert!(
+            directive_lines
+                .iter()
+                .any(|l| l.contains("Rename") && l.contains("index.db-shm")),
+            "hook 应连带保留 index.db-shm 兄弟文件"
         );
     }
 }
