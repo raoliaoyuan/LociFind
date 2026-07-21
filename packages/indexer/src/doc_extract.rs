@@ -699,7 +699,10 @@ mod tests {
         let IndexError::Tag { detail, .. } = err else {
             panic!("expected Tag error, got {err:?}");
         };
-        assert!(!detail.contains("加密"), "非 CFB 文件不应判成加密, 实得: {detail:?}");
+        assert!(
+            !detail.contains("加密"),
+            "非 CFB 文件不应判成加密, 实得: {detail:?}"
+        );
     }
 
     #[test]
