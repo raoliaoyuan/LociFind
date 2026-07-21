@@ -97,8 +97,16 @@ mod office_lock_file_tests {
     #[test]
     fn detects_office_lock_file_prefix() {
         assert!(is_office_lock_file(Path::new("/docs/~$报告.docx")));
-        assert!(is_office_lock_file(Path::new(r"C:\docs\~$Report.xlsx")));
         assert!(is_office_lock_file(Path::new("~$slides.pptx")));
+    }
+
+    // `\` 只在 Windows 上是路径分隔符——Unix 构建下 `Path::file_name()` 会把整段
+    // `C:\docs\~$Report.xlsx` 当成单个不透明分量，不会拆出 `~$Report.xlsx`，
+    // 故这条反斜杠场景只在 Windows target 下有意义（真机走 WalkDir 原生分隔符，无此问题）。
+    #[cfg(windows)]
+    #[test]
+    fn detects_office_lock_file_prefix_windows_backslash() {
+        assert!(is_office_lock_file(Path::new(r"C:\docs\~$Report.xlsx")));
     }
 
     #[test]
