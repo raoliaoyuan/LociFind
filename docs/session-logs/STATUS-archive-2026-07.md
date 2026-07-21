@@ -5,6 +5,11 @@
 > 后续会话的详录写入 session-details-YYYY-MM.md、溢出摘要滚动追加到本文件。
 
 ---
+### 2026-07-10 — Claude Code (Fable 5) — BETA-61 自动增量索引 + BETA-62 MCP 索引中提示（Codex 分派 + 真机 e2e）
+
+**承接**：用户要求「增量/变动文件自动索引、未变不重索引」，指定分派 Codex、Claude Code 监督验收。**关键决策**：摸底确认 scan.rs 增量骨架健全、缺口＝触发时机 → 定「运行期定时增量重扫」（复用 `perform_reindex` 护栏；**不做 notify watcher**，评估意见存 ROADMAP BETA-61 卡）；顺手清账 v0.9.30 未尽的「MCP 索引未完静默 0 命中」（立 BETA-62）。两任务均 `codex exec` headless 分派（62 在独立 git worktree 并行、避 tauri dev 热重载打断 e2e），Claude Code 写任务书、逐行复核、62 手动合回主树（`--3way` 因主树未提交改动拒绝 → 排除法 + 手补两文件、与 worktree 逐字节比对一致）。**产出**：BETA-61/62 落地并全套验证（详 ROADMAP 卡片）；真机 e2e 铁证 = tick 日志 `doc_added=1` 其余全 0 + index.db 标记词 FTS 命中 + 删除回收归零。验证现场全恢复（settings 备份还原、生产 app 重启续跑 E:\Books 扫描 PDF OCR 建库——该启动 reindex 属首建小时级一次性成本、单文件进度持久化）。**未尽事宜**：2 字 CJK trigram 限制仍在。（同日追加：拍板发 **v0.9.31 并双平台发布成功**〔产物齐 + changelog〕；复核发现 v0.9.30 昨日已发布、原「待推」记载过时；发版中 CI 拉到 Rust 1.97 新 lint 打红质量门 → 本地升 1.97 全仓扫净、一处修复推送转绿，沉淀进 [[ci-ubuntu-first-run-lint-gaps]]。）
+
+---
 ### 2026-07-09 — Claude Code (Opus 4.8) — v0.9.28 热修：BETA-60 索引进度回退（误判卡死）
 
 **承接**：用户装 v0.9.27 后，索引中途硬关程序、重开感觉「进度卡死不动」。**现场取证**（Claude Code 直接在用户 Windows 机上 tasklist/sqlite3 只读排查）：装的确是 0.9.27；主库 `%APPDATA%\LociFind\index.db` **完好**——WAL 模式崩溃恢复成功、已 checkpoint 归零、documents=67 + passages=51 在，**我这轮 WAL 改动未致数据丢失**（一度 `sqlite3 -readonly` 读到 0 是没应用 WAL 的旧快照虚惊，WAL-aware `mode=ro` 读到 67）；无 desktop 派生的卡住 OCR 子进程；WAL 时间戳在重开后仍前进＝索引其实在跑。**真因**：BETA-60 Track B 把 `on_file` 放在「128/块并行提取完的块尾串行段」，一块处理期间进度计数器完全不动，块内有慢文件（大 PDF/图 OCR）就冻几十秒→误判卡死。**修①（进度冻结）**：`scan.rs` 把 `on_file` 下沉进并行 `par_iter` map、逐文件提取完即报（`IndexProgress` 本 `Send+Sync` 专为跨线程设计）；串行段不再重复 on_file；`EXTRACT_CHUNK` 128→64。**修②（子进程风暴，同轮真机续查暴露）**：发 v0.9.28 前用户首索引 50 文件卡「0/50」十分钟，现场查出 desktop 派生 **17 个 `pdftoppm.exe`** 并发——按核数并行提取时，多份扫描 PDF 各 spawn `pdftoppm`（一份一进程、200DPI 整份渲染）+ 逐页 OCR，子进程互抢打爆机器、整体更慢。加 `EXTRACT_PARALLELISM=4` 受限 rayon 线程池（`pool.install`）把重量级提取并发压到 4 路（取 min(4, 核数)）。indexer 194 测试 + clippy/fmt + `cargo check -p locifind-desktop` 全绿。（发 v0.9.28 前已取消不充分的首版构建、重发含两修的 v0.9.28；真机无限 hang 无证据：OCR/pdftoppm 均有超时、坏文件返 Err 已妥处）
